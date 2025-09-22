@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>俄语字母笔顺 · React</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --bg: #f6fbff;
+      --card: #ffffff;
+      --card-2: #f3fbff;
+      --text: #1d2633;
+      --muted: #65758b;
+      --primary: #1cb9ff; /* blue-cyan */
+      --accent: #20d9b8;  /* mint green */
+      --stroke-color: #10c9ad; /* teal stroke */
+      --stroke-active-color: #1cb9ff; /* current stroke color */
+      --grid-color: rgba(50, 140, 200, 0.35);
+      --shadow-strong: 0 20px 40px rgba(14, 30, 50, 0.10), inset 0 0 0 1px rgba(10, 30, 60, 0.06);
+      --shadow-soft: 0 8px 22px rgba(14, 30, 50, 0.10), inset 0 0 0 1px rgba(10, 30, 60, 0.05);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, PingFang SC, Microsoft YaHei, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% 0%, rgba(28, 185, 255, 0.20), transparent 60%),
+        radial-gradient(1000px 600px at 100% 0%, rgba(32, 217, 184, 0.16), transparent 65%),
+        linear-gradient(180deg, #ffffff 0%, #f7fbff 40%, #f2f8ff 100%);
+      background-color: var(--bg);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    .app-shell {
+      position: relative;
+      padding: 18px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+      box-shadow: var(--shadow-strong);
+      backdrop-filter: blur(6px) saturate(120%);
+    }
+    .app-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px 16px;
+    }
+    .title {
+      display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 20px;
+    }
+    .title .badge {
+      padding: 4px 10px; border-radius: 999px; background: rgba(28,185,255,0.14);
+      box-shadow: inset 0 0 0 1px rgba(28,185,255,0.35);
+      color: #005b83; font-size: 12px; font-weight: 700;
+    }
+    .controls { display: flex; align-items: center; gap: 10px; }
+    .btn {
+      padding: 8px 12px; border-radius: 10px; border: none; cursor: pointer; color: var(--text);
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+      box-shadow: var(--shadow-soft);
+    }
+    .btn:hover { filter: brightness(1.05); }
+    .btn.primary {
+      background:
+        linear-gradient(180deg, rgba(28,185,255,0.35), rgba(28,185,255,0.15));
+      box-shadow: 0 10px 25px rgba(28,185,255,0.22), inset 0 0 0 1px rgba(28,185,255,0.5);
+    }
+    .grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 14px; padding: 10px;
+    }
+    .tile {
+      height: 92px; border-radius: 16px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(145deg, var(--card), var(--card-2));
+      box-shadow: var(--shadow-soft);
+      position: relative; overflow: hidden; cursor: pointer; user-select: none;
+    }
+    .tile .letter { font-size: 32px; font-weight: 800; letter-spacing: 0.5px; }
+    .tile .sub { position: absolute; bottom: 8px; right: 10px; font-size: 11px; color: var(--muted); }
+    .tile::before { content: ""; position: absolute; inset: -20%; background: radial-gradient(600px 200px at 0% 0%, rgba(32, 217, 184, 0.10), transparent 60%); transform: rotate(10deg); }
+
+    .detail-layout { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+    @media (min-width: 980px) { .detail-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+    .panel {
+      border-radius: 16px; background: linear-gradient(160deg, rgba(255,255,255,0.90), rgba(255,255,255,0.86));
+      box-shadow: var(--shadow-soft);
+      padding: 12px; position: relative; min-width: 0; overflow: hidden;
+    }
+    .panel h3 { margin: 4px 8px 10px; font-size: 14px; color: var(--muted); font-weight: 700; }
+
+    .stage-wrap { display: flex; flex-direction: column; gap: 10px; align-items: center; width: 100%; }
+    .stage {
+      width: 100%; max-width: 600px; aspect-ratio: 1 / 1; height: auto; border-radius: 14px; overflow: hidden; position: relative;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.90));
+      box-shadow: var(--shadow-soft);
+      border: 1px solid rgba(10,30,60,0.08);
+      margin: 0 auto;
+    }
+    svg.stage-svg { width: 100%; height: 100%; display: block; }
+    .legend { font-size: 12px; color: var(--muted); text-align: center; }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .input-num { width: 84px; padding: 6px 8px; border-radius: 10px; border: none; color: var(--text);
+      background: rgba(255,255,255,0.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }
+
+    .kicker { margin: 6px 0 10px; color: var(--muted); font-size: 13px; }
+    a.back { color: #0aa4a4; text-decoration: none; }
+    a.back:hover { text-decoration: underline; }
+
+    .error { color: #a4002a; font-size: 13px; padding: 6px 10px; background: #ffeef1; border-radius: 8px; }
+
+    /* Small screen refinements */
+    @media (max-width: 980px) {
+      .app-shell { padding: 14px; }
+      .toolbar { justify-content: flex-start; }
+    }
+    @media (max-width: 640px) {
+      .container { padding: 14px 10px 28px; }
+      .btn, .input-num { font-size: 14px; }
+    }
+
+    /* Settings popover */
+    .settings-popover {
+      position: absolute; top: 16px; right: 16px; z-index: 40;
+      width: 280px; padding: 12px; border-radius: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.95));
+      box-shadow: 0 18px 40px rgba(14, 30, 50, 0.18), inset 0 0 0 1px rgba(10, 30, 60, 0.06);
+      color: var(--text);
+    }
+    .settings-popover h4 { margin: 2px 0 10px; font-size: 14px; color: #17324f; }
+    .settings-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; margin: 8px 0; }
+    .settings-row label { color: var(--muted); font-size: 13px; }
+    .settings-popover .input-num { width: 110px; }
+    .settings-button { position: absolute; top: 16px; right: 16px; z-index: 41; }
+  </style>
+  <!-- React + ReactDOM + Babel (standalone JSX transform) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="app-shell">
+      <div id="root"></div>
+    </div>
+  </div>
+
+  <script type="text/babel">
+    const { useEffect, useMemo, useRef, useState } = React;
+
+    // Russian alphabet uppercase list
+    const RUS_UPPER = [
+      'А','Б','В','Г','Д','Е','Ё','Ж','З','И','Й','К','Л','М','Н','О','П','Р','С','Т','У','Ф','Х','Ц','Ч','Ш','Щ','Ъ','Ы','Ь','Э','Ю','Я'
+    ];
+
+    // Map Cyrillic <-> Latin confusables for filename fallback
+    const CYR_TO_LAT = new Map([
+      ['А','A'], ['В','B'], ['Е','E'], ['К','K'], ['М','M'], ['Н','H'], ['О','O'], ['Р','P'], ['С','C'], ['Т','T'], ['У','Y'], ['Х','X'],
+      ['а','a'], ['е','e'], ['к','k'], ['м','m'], ['н','n'], ['о','o'], ['р','p'], ['с','c'], ['т','t'], ['у','y'], ['х','x']
+    ]);
+
+    function toLowerRu(ch) {
+      return ch.toLocaleLowerCase('ru-RU');
+    }
+
+    function candidateChars(ch, isLower) {
+      const base = isLower ? toLowerRu(ch) : ch;
+      const list = [base];
+      const alt = CYR_TO_LAT.get(base) || [...CYR_TO_LAT.entries()].find(([, lat]) => lat === base)?.[0];
+      if (alt && !list.includes(alt)) list.push(alt);
+      return list;
+    }
+
+    async function fetchFirstOk(urls) {
+      for (const url of urls) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) return { url, text: await res.text() };
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    function buildSvgCandidates(letter, isLower) {
+      const chars = candidateChars(letter, isLower);
+      const names = isLower ? chars.map(c => `letters/${c}_l.svg`) : chars.map(c => `letters/${c}.svg`);
+      // Ensure Latin A/a fallback if user assets are ASCII for A only
+      if (!names.some(n => /\/A(_l)?\.svg$/.test(n))) {
+        if (isLower) names.push('letters/a_l.svg'); else names.push('letters/A.svg');
+      }
+      return [...new Set(names)];
+    }
+
+    function useHashRoute() {
+      const [letter, setLetter] = useState(() => decodeURIComponent((location.hash || '').replace(/^#\/?/, '')) || '');
+      useEffect(() => {
+        const onHash = () => setLetter(decodeURIComponent((location.hash || '').replace(/^#\/?/, '')) || '');
+        window.addEventListener('hashchange', onHash);
+        return () => window.removeEventListener('hashchange', onHash);
+      }, []);
+      const push = (ch) => { location.hash = `/${encodeURIComponent(ch)}`; };
+      const clear = () => { location.hash = ''; };
+      return { letter, push, clear };
+    }
+
+    function GridOverlay({ width=600, height=600 }) {
+      const midGap = 150; // distance between the two middle lines
+      const centerY = height / 2; // 300
+      const y2 = centerY - midGap / 2; // 225
+      const y3 = centerY + midGap / 2; // 375
+      const margin = 100; // top/bottom to frame nicely
+      const y1 = margin;  // 100
+      const y4 = height - margin; // 500
+      return (
+        <g vectorEffect="non-scaling-stroke">
+          <rect x="0" y="0" width={width} height={height} fill="rgba(255,255,255,0.02)" />
+          {/* light background gradient sheen */}
+          <defs>
+            <linearGradient id="gridSheen" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="rgba(255,255,255,0.06)"/>
+              <stop offset="100%" stopColor="rgba(255,255,255,0.00)"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width={width} height={height} fill="url(#gridSheen)" />
+          {[[y1, 1.0], [y2, 0.9], [y3, 0.9], [y4, 1.0]].map(([y, alpha], idx) => (
+            <line key={idx} x1="0" x2={width} y1={y} y2={y}
+              stroke={`rgba(180,200,230,${alpha})`} strokeWidth={idx === 1 || idx === 2 ? 1.5 : 2.5}
+              strokeDasharray={idx === 1 || idx === 2 ? '6 6' : 'none'} />
+          ))}
+          {/* outer border */}
+          <rect x="0.5" y="0.5" width={width-1} height={height-1} fill="none" stroke="rgba(200, 210, 230, 0.20)" />
+        </g>
+      );
+    }
+
+    function SettingsPopover({ settings, onChange, onClose }) {
+      return (
+        <div className="settings-popover" role="dialog" aria-label="播放设置">
+          <h4>播放设置</h4>
+          <div className="settings-row">
+            <label>速度(px/s)</label>
+            <input className="input-num" type="number" value={settings.speed} min="10" max="4000" step="10" onChange={e=>onChange({ ...settings, speed: Number(e.target.value)||300 })} />
+          </div>
+          <div className="settings-row">
+            <label>笔宽</label>
+            <input className="input-num" type="number" value={settings.width} min="1" max="80" step="1" onChange={e=>onChange({ ...settings, width: Number(e.target.value)||8 })} />
+          </div>
+          <div className="settings-row">
+            <label>间隔(s)</label>
+            <input className="input-num" type="number" value={settings.gap} min="0" max="3" step="0.05" onChange={e=>onChange({ ...settings, gap: Number(e.target.value)||0 })} />
+          </div>
+          <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:8}}>
+            <button className="btn" onClick={onClose}>关闭</button>
+          </div>
+        </div>
+      );
+    }
+
+    function StrokeAnimator({ candidates, autoplay=true, settings, onSettingsChange }) {
+      const [error, setError] = useState('');
+      const [paths, setPaths] = useState([]);
+      const speed = settings.speed;
+      const gap = settings.gap;
+      const strokeWidth = settings.width;
+      const [stepIndex, setStepIndex] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const svgRef = useRef(null);
+      const animRefs = useRef([]);
+      const stepTimersRef = useRef([]);
+
+      useEffect(() => {
+        let abort = false;
+        (async () => {
+          setError(''); setPaths([]); setIsPlaying(false); setStepIndex(0);
+          const found = await fetchFirstOk(candidates);
+          if (abort) return;
+          if (!found) { setError('未找到对应的 SVG 文件'); return; }
+          const parsed = new DOMParser().parseFromString(found.text, 'image/svg+xml');
+          const dList = Array.from(parsed.querySelectorAll('path'))
+            .map(p => p.getAttribute('d'))
+            .filter(Boolean);
+          if (dList.length === 0) { setError('SVG 中未包含 path'); return; }
+          setPaths(dList.map(d => ({ d })));
+        })();
+        return () => { abort = true; stopAnimations(); };
+      }, [JSON.stringify(candidates)]);
+
+      function stopAnimations() {
+        animRefs.current.forEach(a => { try { a.cancel(); } catch(_){} });
+        animRefs.current = [];
+        stepTimersRef.current.forEach(id => { try { clearTimeout(id); } catch(_){} });
+        stepTimersRef.current = [];
+      }
+
+      useEffect(() => {
+        if (!autoplay || paths.length === 0) return;
+        playSequential();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [paths, speed, gap, strokeWidth, autoplay]);
+
+      function playSequential(fromIndex = 0) {
+        stopAnimations();
+        setIsPlaying(true);
+        const svg = svgRef.current;
+        if (!svg) return;
+        const pathEls = Array.from(svg.querySelectorAll('#all-strokes path.stroke'));
+        let delayAcc = 0;
+        const durations = [];
+        const lengths = [];
+        for (let i = 0; i < pathEls.length; i++) {
+          const el = pathEls[i];
+          const length = el.getTotalLength();
+          lengths[i] = length;
+          el.style.strokeDasharray = String(length);
+          el.style.strokeDashoffset = String(length);
+          const dur = Math.max(0.05, length / Math.max(1, speed));
+          durations[i] = dur;
+          const delay = i < fromIndex ? 0 : delayAcc;
+          const anim = el.animate([
+            { strokeDashoffset: length },
+            { strokeDashoffset: 0 }
+          ], { duration: dur * 1000, delay: delay * 1000, easing: 'ease-in-out', fill: 'forwards' });
+          animRefs.current.push(anim);
+          if (i >= fromIndex) delayAcc += dur + gap;
+        }
+
+        // Schedule highlight (glow) per stroke from the very beginning
+        let startAcc = 0;
+        for (let i = fromIndex; i < pathEls.length; i++) {
+          const startMs = startAcc * 1000;
+          const id = setTimeout(() => {
+            setStepIndex(i);
+            // animate the step layer in sync
+            requestAnimationFrame(() => {
+              const stepEl = svgRef.current && svgRef.current.querySelector('#step-stroke path.stroke-step');
+              if (!stepEl) return;
+              const len = stepEl.getTotalLength();
+              stepEl.style.strokeDasharray = String(len);
+              stepEl.style.strokeDashoffset = String(len);
+              try {
+                const anim = stepEl.animate([
+                  { strokeDashoffset: len },
+                  { strokeDashoffset: 0 }
+                ], { duration: Math.max(0.05, durations[i]) * 1000, easing: 'ease-in-out', fill: 'forwards' });
+                animRefs.current.push(anim);
+              } catch(_) {}
+            });
+          }, startMs);
+          stepTimersRef.current.push(id);
+          startAcc += durations[i] + gap;
+        }
+
+        const totalMs = delayAcc * 1000 + 20;
+        const endId = setTimeout(() => {
+          // hide highlight right after the last stroke completes
+          setStepIndex(-1);
+          setIsPlaying(false);
+        }, totalMs);
+        stepTimersRef.current.push(endId);
+      }
+
+      function resetAll() {
+        stopAnimations();
+        const svg = svgRef.current;
+        if (svg) {
+          Array.from(svg.querySelectorAll('#all-strokes path.stroke, #step-stroke path.stroke-step')).forEach(el => {
+            const length = el.getTotalLength();
+            el.style.strokeDasharray = String(length);
+            el.style.strokeDashoffset = String(length);
+          });
+        }
+        setIsPlaying(false);
+        setStepIndex(0);
+      }
+
+      const showPaths = useMemo(() => {
+        if (paths.length === 0) return [];
+        return paths.map((p, idx) => ({ ...p, visible: true, idx }));
+      }, [paths]);
+
+      const stepPaths = useMemo(() => {
+        if (paths.length === 0) return [];
+        const invalid = stepIndex < 0 || stepIndex >= paths.length;
+        if (invalid) {
+          return paths.map((p, i) => ({ ...p, visible: false, idx: i }));
+        }
+        return paths.map((p, i) => ({ ...p, visible: i === stepIndex, idx: i }));
+      }, [paths, stepIndex]);
+
+      return (
+        <div className="stage-wrap">
+          <div className="toolbar" style={{marginTop: 2}}>
+            <button className="btn" onClick={resetAll}>重置</button>
+            <button className="btn primary" onClick={() => playSequential(0)} disabled={paths.length===0 || isPlaying}>播放全部</button>
+          </div>
+          <div className="toolbar">
+            <button className="btn" onClick={() => setStepIndex(i => Math.max(0, i-1))}>上一笔</button>
+            <span className="kicker">分解第 {paths.length===0?0:stepIndex+1} / {paths.length} 笔</span>
+            <button className="btn" onClick={() => setStepIndex(i => Math.min(paths.length-1, i+1))}>下一笔</button>
+            {/*<button className="btn" onClick={() => { resetAll(); playSequential(stepIndex); }}>从该笔播放</button> */}
+          </div>
+          <div className="stage">
+            <svg ref={svgRef} className="stage-svg" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
+              <GridOverlay />
+              {/* full animation layer (kept underneath to preserve finished state) */}
+              <g id="all-strokes" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#10c9ad'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round">
+                {showPaths.map(({d, idx}) => (
+                  <path key={`all-${idx}`} className="stroke" d={d} />
+                ))}
+              </g>
+              {/* step layer - highlights single stroke by thicker width and glow */}
+              <g id="step-stroke" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round">
+                {stepPaths.map(({d, visible, idx}) => visible ? (
+                  <g key={`step-${idx}`}>
+                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                  </g>
+                ) : null)}
+              </g>
+            </svg>
+          </div>
+          {error && <div className="error">{error}</div>}
+        </div>
+      );
+    }
+
+    function LetterPanel({ letter, label, settings }) {
+      const lower = toLowerRu(letter);
+      const isLower = label === '小写';
+      const cands = useMemo(() => buildSvgCandidates(isLower ? lower : letter, isLower), [letter, label]);
+      return (
+        <div className="panel">
+          <h3>{label}（{isLower ? lower : letter}）</h3>
+          <StrokeAnimator candidates={cands} autoplay={true} settings={settings} />
+        </div>
+      );
+    }
+
+    function Detail({ letter, onBack, onToggleSettings, settings }) {
+      return (
+        <div>
+          <div className="app-header" style={{paddingTop: 0, paddingBottom: 8}}>
+            <div className="title">
+              <a className="back" href="#" onClick={(e)=>{e.preventDefault(); onBack();}}>&larr; 返回</a>
+              <div style={{fontSize: 24, fontWeight: 800, letterSpacing: 0.5}}>{letter}</div>
+              <span className="badge">自动播放</span>
+            </div>
+            <div className="controls">
+              <button className="btn" onClick={onToggleSettings}>设置</button>
+            </div>
+          </div>
+          <div className="detail-layout">
+            <LetterPanel letter={letter} label="大写" settings={settings} />
+            <LetterPanel letter={letter} label="小写" settings={settings} />
+          </div>
+        </div>
+      );
+    }
+
+    function Home({ onPick, onToggleSettings }) {
+      return (
+        <div>
+          <div className="app-header">
+            <div className="title">
+              <div style={{width: 12, height: 12, borderRadius: 999, background: 'linear-gradient(180deg, #9ad0ff, #66a6ff)', boxShadow: '0 0 18px rgba(102,166,255,0.6)'}} />
+              俄语字母笔顺
+            </div>
+            <div className="controls">
+              <button className="btn" onClick={onToggleSettings}>设置</button>
+            </div>
+          </div>
+          <div className="kicker">点击任意字母查看其笔顺（下方将同时显示大写与小写并自动播放）</div>
+          <div className="panel" style={{padding: 8}}>
+            <div className="grid">
+              {RUS_UPPER.map(ch => (
+                <div key={ch} className="tile" onClick={() => onPick(ch)}>
+                  <div className="letter">{ch}</div>
+                  <div className="sub">{toLowerRu(ch)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const { letter, push, clear } = useHashRoute();
+      const isHome = !letter;
+      const [settings, setSettings] = useState({ speed: 300, width: 8, gap: 0.15 });
+      const [showSettings, setShowSettings] = useState(false);
+      const toggleSettings = () => setShowSettings(v => !v);
+      return (
+        <div>
+          {isHome ? (
+            <Home onPick={push} onToggleSettings={toggleSettings} />
+          ) : (
+            <Detail letter={letter} onBack={clear} onToggleSettings={toggleSettings} settings={settings} />
+          )}
+          {showSettings && (
+            <SettingsPopover settings={settings} onChange={setSettings} onClose={()=>setShowSettings(false)} />
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+
+

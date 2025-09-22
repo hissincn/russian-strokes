@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="336.00041px" height="353.000545px" viewBox="0 0 336.00041 353.000545" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>A</title>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="A" transform="translate(-130.9999, -23.9997)">
+            <rect id="Rectangle" x="0" y="0" width="631.578947" height="600"></rect>
+            <path d="M132,329.751557 C157.188868,333.560951 161.466223,402.130052 216.913416,351.338125 C272.519029,300.546199 423.652236,79.4425958 465,25" id="Path" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M466,25 C445.81457,82.6529412 366.18543,318.347059 346,376" id="Path" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M346.132572,376 C345.814545,368.046639 348.99482,346.73163 343.747366,328.279831 C338.658926,309.828032 327.527963,279.605259 315.12489,265.448275 C302.880831,251.291292 286.184386,246.519275 269.80597,243.178863 C253.427553,239.838451 228.144366,240.156586 216.695375,245.405804 C205.405399,250.81409 196.182601,266.243612 201.589068,275.310444 C206.995536,284.377276 211.129894,300.124931 249.452209,300.124931 C287.933538,300.283999 401.628373,279.923393 432,275.787645" id="Path" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </g>
+    </g>
+</svg>

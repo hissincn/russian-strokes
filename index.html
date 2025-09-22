@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SVG 笔顺笔画动画（红色书写）</title>
+  <style>
+    :root { --stroke-color: #e60000; --stroke-width: 8; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 16px; color: #222; }
+    h2 { margin: 0 0 12px; font-weight: 600; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    textarea { width: 100%; min-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; padding: 10px; border: 1px solid #e6e6e6; border-radius: 8px; box-sizing: border-box; }
+    label { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+    input[type="number"] { width: 88px; padding: 6px 8px; border: 1px solid #e6e6e6; border-radius: 6px; }
+    .controls { margin: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    button { padding: 8px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; }
+    button:hover { background: #f6f6f6; }
+    svg { width: 100%; height: auto; background: #fff; border: 1px solid #eee; border-radius: 8px; }
+    .stage { padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; }
+    .hint { color: #666; font-size: 12px; margin-top: 8px; }
+    @media (max-width: 860px) { .row { grid-template-columns: 1fr; } }
+  </style>
+  <!--
+    使用说明：
+    1) 在左侧输入框粘贴 path 的 d（多条可按行分隔），或直接粘贴完整 SVG。
+    2) 点击「开始动画」，右侧将按笔顺（path 顺序）依次以红色描边动画。
+    3) 可调节速度(px/s)、笔画宽度、笔画间隔(s)。
+  -->
+  <meta name="color-scheme" content="light dark">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <h2>SVG 笔顺笔画动画（红色书写）</h2>
+
+  <div class="row">
+    <div>
+      <div class="controls">
+        <label>速度(px/s)
+          <input type="number" id="speed" value="300" min="10" max="4000" step="10">
+        </label>
+        <label>画布宽(px)
+          <input type="number" id="stageW" value="564" min="10" max="5000" step="10">
+        </label>
+        <label>画布高(px)
+          <input type="number" id="stageH" value="461" min="10" max="5000" step="10">
+        </label>
+        <label>笔画宽度
+          <input type="number" id="width" value="8" min="1" max="80" step="1">
+        </label>
+        <label>间隔(s)
+          <input type="number" id="gap" value="0.15" min="0" max="3" step="0.05">
+        </label>
+        <button id="animate">开始动画</button>
+        <button id="reset">清空</button>
+      </div>
+      <textarea id="input" placeholder="粘贴多条 path 的 d，每行一条；或直接粘贴完整 SVG（包含多个 path）。"></textarea>
+      <div class="hint">提示：
+        若粘贴完整 SVG，将自动提取其中的每个 path 并按顺序逐一描绘；若只粘贴 d，则每行视为一个笔画。
+        支持拖拽 SVG 文件到此页面自动载入。
+      </div>
+    </div>
+
+    <div class="stage">
+      <svg id="stage" viewBox="0 0 564 461" xmlns="http://www.w3.org/2000/svg" aria-label="预览"></svg>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const inputEl = document.getElementById('input');
+      const stageEl = document.getElementById('stage');
+      const speedEl = document.getElementById('speed');
+      const stageWEl = document.getElementById('stageW');
+      const stageHEl = document.getElementById('stageH');
+      const widthEl = document.getElementById('width');
+      const gapEl = document.getElementById('gap');
+      const animateBtn = document.getElementById('animate');
+      const resetBtn = document.getElementById('reset');
+
+      function clearStage() {
+        while (stageEl.firstChild) stageEl.removeChild(stageEl.firstChild);
+      }
+
+      function parseInput(text) {
+        const trimmed = text.trim();
+        if (!trimmed) return { viewBox: null, paths: [] };
+
+        // 若是完整 SVG
+        if (trimmed.startsWith('<')) {
+          const parsed = new DOMParser().parseFromString(trimmed, 'image/svg+xml');
+          const svg = parsed.querySelector('svg');
+          let viewBox = null;
+          if (svg && svg.hasAttribute('viewBox')) viewBox = svg.getAttribute('viewBox');
+          const ds = Array.from(parsed.querySelectorAll('path'))
+            .map(p => ({ d: p.getAttribute('d') }))
+            .filter(x => x.d && x.d.trim().length > 0);
+          return { viewBox, paths: ds };
+        }
+
+        // 按行拆分 d
+        const ds = trimmed
+          .split(/\r?\n/)
+          .map(s => s.trim())
+          .filter(Boolean)
+          .map(d => ({ d }));
+        return { viewBox: null, paths: ds };
+      }
+
+      function animatePaths(items, speedPxPerSec, gapSeconds, strokeWidth) {
+        if (!items || items.length === 0) return [];
+
+        const elements = [];
+        items.forEach(({ d }) => {
+          const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          p.setAttribute('d', d);
+          p.setAttribute('fill', 'none');
+          p.setAttribute('stroke', getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#e60000');
+          p.setAttribute('stroke-width', String(strokeWidth));
+          p.setAttribute('stroke-linecap', 'round');
+          p.setAttribute('stroke-linejoin', 'round');
+          stageEl.appendChild(p);
+          elements.push(p);
+        });
+
+        let currentDelay = 0;
+        const animations = [];
+        elements.forEach(p => {
+          const length = p.getTotalLength();
+          p.style.strokeDasharray = String(length);
+          p.style.strokeDashoffset = String(length);
+
+          const duration = Math.max(0.05, length / Math.max(1, speedPxPerSec));
+          const anim = p.animate([
+            { strokeDashoffset: length },
+            { strokeDashoffset: 0 }
+          ], {
+            duration: duration * 1000,
+            delay: currentDelay * 1000,
+            easing: 'ease-in-out',
+            fill: 'forwards'
+          });
+          animations.push(anim);
+          currentDelay += duration + gapSeconds;
+        });
+
+        return animations;
+      }
+
+      animateBtn.addEventListener('click', () => {
+        const { viewBox, paths } = parseInput(inputEl.value);
+        clearStage();
+        if (viewBox) stageEl.setAttribute('viewBox', viewBox);
+        const stageW = Math.max(10, Number(stageWEl.value) || 564);
+        const stageH = Math.max(10, Number(stageHEl.value) || 461);
+        stageEl.style.width = stageW + 'px';
+        stageEl.style.height = stageH + 'px';
+        const speed = Number(speedEl.value) || 300;
+        const width = Number(widthEl.value) || 8;
+        const gap = Number(gapEl.value) || 0;
+        animatePaths(paths, speed, gap, width);
+      });
+
+      resetBtn.addEventListener('click', () => {
+        inputEl.value = '';
+        clearStage();
+      });
+
+      // 拖拽本地 SVG 文件以快速载入
+      document.addEventListener('dragover', e => { e.preventDefault(); });
+      document.addEventListener('drop', async e => {
+        e.preventDefault();
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file) return;
+        const text = await file.text();
+        inputEl.value = text;
+      });
+    })();
+  </script>
+</body>
+</html>
+
+
