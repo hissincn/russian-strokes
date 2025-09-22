@@ -156,6 +156,18 @@
       box-shadow: 0 2px 8px rgba(14,30,50,0.08), inset 0 0 0 1px rgba(10,30,60,0.06);
     }
     .thumb:hover { filter: brightness(1.04); }
+
+    /* Segmented controls */
+    .controls-row { display: flex; align-items: center; justify-content: center; margin: 8px 0; }
+    .segmented { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.88));
+      box-shadow: var(--shadow-soft);
+      border: 1px solid rgba(10,30,60,0.06);
+    }
+    .seg { padding: 8px 14px; border-radius: 999px; background: transparent; border: none; cursor: pointer; color: var(--text); font-weight: 700; }
+    .seg:hover { filter: brightness(1.02); }
+    .seg.active { background: linear-gradient(180deg, rgba(28,185,255,0.22), rgba(28,185,255,0.12)); box-shadow: inset 0 0 0 1px rgba(28,185,255,0.45); color: #053a58; }
+    .seg:disabled { opacity: 0.55; cursor: not-allowed; }
   </style>
   <!-- React + ReactDOM + Babel (standalone JSX transform) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -297,6 +309,7 @@
       const stepTimersRef = useRef([]);
       const [forceShowAll, setForceShowAll] = useState(false); // show full black paths for both sides when preview is clicked
       const [hasCompletedCycle, setHasCompletedCycle] = useState(false);
+      const [activeSegment, setActiveSegment] = useState(''); // '', 'left', 'right'
 
       function finalizeGroup(which) {
         try {
@@ -510,16 +523,21 @@
 
       return (
         <div className="stage-wrap">
-          <div className="toolbar" style={{marginTop: 2}}>
-            <button className="btn primary" onClick={() => {
-              setForceShowAll(false);
-              resetAll();
-              setTimeout(() => { setPrepared(true); playSequential('left', 0); }, 30);
-            }} disabled={(pathsLeft.length===0 && pathsRight.length===0) || isPlaying}>重播</button>
+          <div className="controls-row" style={{marginTop: 6}}>
+            <div className="segmented">
+              <button className="seg" onClick={() => {
+                setForceShowAll(false);
+                resetAll();
+                setTimeout(() => { setPrepared(true); playSequential('left', 0); }, 30);
+                setActiveSegment('');
+              }} disabled={(pathsLeft.length===0 && pathsRight.length===0) || isPlaying}>重播</button>
+              <button className={`seg ${activeSegment==='left' ? 'active' : ''}`} onClick={() => { setActiveSegment('left'); playHighlightSequence('left', 0); }} disabled={!hasCompletedCycle}>大写</button>
+              <button className={`seg ${activeSegment==='right' ? 'active' : ''}`} onClick={() => { setActiveSegment('right'); playHighlightSequence('right', 0); }} disabled={!hasCompletedCycle}>小写</button>
+            </div>
           </div>
           <div className="previews">
-            {renderPreviews(showPathsLeft, '大写', (i) => playHighlightSequence('left', i))}
-            {renderPreviews(showPathsRight, '小写', (i) => playHighlightSequence('right', i))}
+            {renderPreviews(showPathsLeft, '大写', (i) => { setActiveSegment('left'); playHighlightSequence('left', i); })}
+            {renderPreviews(showPathsRight, '小写', (i) => { setActiveSegment('right'); playHighlightSequence('right', i); })}
           </div>
           <div className="stage dual">
             <svg ref={svgRef} className="stage-svg" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
