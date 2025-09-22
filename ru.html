@@ -18,7 +18,7 @@
       --muted: #65758b;
       --primary: #1cb9ff; /* blue-cyan */
       --accent: #20d9b8;  /* mint green */
-      --stroke-color: #10c9ad; /* teal stroke */
+      --stroke-color: #000000; /* base stroke: black */
       --stroke-active-color: #1cb9ff; /* current stroke color */
       --grid-color: rgba(50, 140, 200, 0.35);
       --shadow-strong: 0 20px 40px rgba(14, 30, 50, 0.10), inset 0 0 0 1px rgba(10, 30, 60, 0.06);
@@ -104,6 +104,7 @@
       border: 1px solid rgba(10,30,60,0.08);
       margin: 0 auto;
     }
+    .stage.dual { max-width: 1200px; aspect-ratio: 2 / 1; }
     svg.stage-svg { width: 100%; height: 100%; display: block; }
     .legend { font-size: 12px; color: var(--muted); text-align: center; }
 
@@ -140,6 +141,21 @@
     .settings-row label { color: var(--muted); font-size: 13px; }
     .settings-popover .input-num { width: 110px; }
     .settings-button { position: absolute; top: 16px; right: 16px; z-index: 41; }
+
+    /* Pair row: uppercase + lowercase in one row */
+    .pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+    .stage-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .mini-label { font-size: 13px; color: var(--muted); }
+
+    /* Stroke previews */
+    .previews { display: grid; gap: 8px; margin: 6px 0 10px; }
+    .preview-strip { display: flex; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .preview-title { font-size: 12px; color: var(--muted); margin-right: 6px; white-space: nowrap; }
+    .thumb { width: 46px; height: 46px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto;
+      background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.86));
+      box-shadow: 0 2px 8px rgba(14,30,50,0.08), inset 0 0 0 1px rgba(10,30,60,0.06);
+    }
+    .thumb:hover { filter: brightness(1.04); }
   </style>
   <!-- React + ReactDOM + Babel (standalone JSX transform) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -264,7 +280,288 @@
       );
     }
 
-    function StrokeAnimator({ candidates, autoplay=true, settings, onSettingsChange }) {
+    // Combined animator: one SVG, left uppercase (0~600), right lowercase (translated +600), chain playback
+    function CombinedAnimator({ candidatesLeft, candidatesRight, autoplay=true, settings }) {
+      const [error, setError] = useState('');
+      const [pathsLeft, setPathsLeft] = useState([]);
+      const [pathsRight, setPathsRight] = useState([]);
+      const speed = settings.speed;
+      const gap = settings.gap;
+      const strokeWidth = settings.width;
+      const [stepIndex, setStepIndex] = useState(0);
+      const [phase, setPhase] = useState('left');
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [prepared, setPrepared] = useState(false);
+      const svgRef = useRef(null);
+      const animRefs = useRef([]);
+      const stepTimersRef = useRef([]);
+      const [forceShowAll, setForceShowAll] = useState(false); // show full black paths for both sides when preview is clicked
+      const [hasCompletedCycle, setHasCompletedCycle] = useState(false);
+
+      function finalizeGroup(which) {
+        try {
+          const svg = svgRef.current;
+          if (!svg) return;
+          const sel = which === 'left' ? '#all-strokes-left path.stroke' : '#all-strokes-right path.stroke';
+          Array.from(svg.querySelectorAll(sel)).forEach(el => {
+            el.style.strokeDasharray = 'none';
+            el.style.strokeDashoffset = '0';
+          });
+        } catch(_) {}
+      }
+
+      useEffect(() => {
+        let abort = false;
+        (async () => {
+          setError(''); setIsPlaying(false); setStepIndex(0); setPhase('left'); setPrepared(false); setHasCompletedCycle(false);
+          setPathsLeft([]); setPathsRight([]);
+          const [foundL, foundR] = await Promise.all([
+            fetchFirstOk(candidatesLeft),
+            fetchFirstOk(candidatesRight)
+          ]);
+          if (abort) return;
+          if (!foundL) { setError('未找到大写 SVG'); return; }
+          if (!foundR) { setError('未找到小写 SVG'); return; }
+          const parsedL = new DOMParser().parseFromString(foundL.text, 'image/svg+xml');
+          const parsedR = new DOMParser().parseFromString(foundR.text, 'image/svg+xml');
+          const dListL = Array.from(parsedL.querySelectorAll('path')).map(p => p.getAttribute('d')).filter(Boolean);
+          const dListR = Array.from(parsedR.querySelectorAll('path')).map(p => p.getAttribute('d')).filter(Boolean);
+          if (dListL.length === 0) { setError('大写 SVG 中未包含 path'); return; }
+          if (dListR.length === 0) { setError('小写 SVG 中未包含 path'); return; }
+          setPathsLeft(dListL.map(d => ({ d })));
+          setPathsRight(dListR.map(d => ({ d })));
+        })();
+        return () => { abort = true; stopAnimations(); };
+      }, [JSON.stringify(candidatesLeft), JSON.stringify(candidatesRight)]);
+
+      function stopAnimations() {
+        animRefs.current.forEach(a => { try { a.cancel(); } catch(_){} });
+        animRefs.current = [];
+        stepTimersRef.current.forEach(id => { try { clearTimeout(id); } catch(_){} });
+        stepTimersRef.current = [];
+      }
+
+      useEffect(() => {
+        if (!autoplay) return;
+        if (pathsLeft.length > 0 || pathsRight.length > 0) {
+          // ensure all paths are hidden first, then reveal and animate
+          resetAll();
+          setPrepared(true);
+          playSequential('left', 0);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [pathsLeft, pathsRight, speed, gap, strokeWidth, autoplay]);
+
+      function playSequential(which = 'left', fromIndex = 0) {
+        stopAnimations();
+        setIsPlaying(true);
+        const svg = svgRef.current;
+        if (!svg) return;
+        setPhase(which);
+        const groupSelector = which === 'left' ? '#all-strokes-left' : '#all-strokes-right';
+        const stepSelector = which === 'left' ? '#step-stroke-left' : '#step-stroke-right';
+        const pathEls = Array.from(svg.querySelectorAll(`${groupSelector} path.stroke`));
+        let delayAcc = 0;
+        const durations = [];
+        for (let i = 0; i < pathEls.length; i++) {
+          const el = pathEls[i];
+          const length = el.getTotalLength();
+          el.style.strokeDasharray = String(length);
+          el.style.strokeDashoffset = String(length);
+          const dur = Math.max(0.05, length / Math.max(1, speed));
+          durations[i] = dur;
+          const delay = i < fromIndex ? 0 : delayAcc;
+          try {
+            const anim = el.animate([
+              { strokeDashoffset: length },
+              { strokeDashoffset: 0 }
+            ], { duration: dur * 1000, delay: delay * 1000, easing: 'ease-in-out', fill: 'forwards' });
+            animRefs.current.push(anim);
+          } catch(_){}
+          if (i >= fromIndex) delayAcc += dur + gap;
+        }
+
+        let startAcc = 0;
+        for (let i = fromIndex; i < pathEls.length; i++) {
+          const startMs = startAcc * 1000;
+          const id = setTimeout(() => {
+            setStepIndex(i);
+            requestAnimationFrame(() => {
+              const stepEl = svgRef.current && svgRef.current.querySelector(`${stepSelector} path.stroke-step`);
+              if (!stepEl) return;
+              const len = stepEl.getTotalLength();
+              stepEl.style.strokeDasharray = String(len);
+              stepEl.style.strokeDashoffset = String(len);
+              try {
+                const anim = stepEl.animate([
+                  { strokeDashoffset: len },
+                  { strokeDashoffset: 0 }
+                ], { duration: Math.max(0.05, durations[i]) * 1000, easing: 'ease-in-out', fill: 'forwards' });
+                animRefs.current.push(anim);
+              } catch(_) {}
+            });
+          }, startMs);
+          stepTimersRef.current.push(id);
+          startAcc += durations[i] + gap;
+        }
+
+        const totalMs = delayAcc * 1000 + 20;
+        const endId = setTimeout(() => {
+          setStepIndex(-1);
+          setIsPlaying(false);
+          if (which === 'left' && pathsRight.length > 0) {
+            // ensure left stays drawn permanently before starting right
+            finalizeGroup('left');
+            playSequential('right', 0);
+          } else if (which === 'right' || (which === 'left' && pathsRight.length === 0)) {
+            // finalize whichever side finished and mark cycle complete
+            finalizeGroup(which);
+            setHasCompletedCycle(true);
+          }
+        }, totalMs);
+        stepTimersRef.current.push(endId);
+      }
+
+      function resetAll() {
+        stopAnimations();
+        const svg = svgRef.current;
+        if (svg) {
+          Array.from(svg.querySelectorAll('#all-strokes-left path.stroke, #all-strokes-right path.stroke, #step-stroke-left path.stroke-step, #step-stroke-right path.stroke-step')).forEach(el => {
+            const length = el.getTotalLength();
+            el.style.strokeDasharray = String(length);
+            el.style.strokeDashoffset = String(length);
+          });
+        }
+        setIsPlaying(false);
+        setStepIndex(0);
+        setPhase('left');
+        setPrepared(false);
+      }
+
+      const showPathsLeft = useMemo(() => pathsLeft.map((p, idx) => ({ ...p, idx })), [pathsLeft]);
+      const showPathsRight = useMemo(() => pathsRight.map((p, idx) => ({ ...p, idx })), [pathsRight]);
+      const stepPathsLeft = useMemo(() => pathsLeft.map((p, i) => ({ ...p, visible: phase==='left' && i===stepIndex, idx: i })), [pathsLeft, stepIndex, phase]);
+      const stepPathsRight = useMemo(() => pathsRight.map((p, i) => ({ ...p, visible: phase==='right' && i===stepIndex, idx: i })), [pathsRight, stepIndex, phase]);
+
+      function playHighlightSequence(which, startIndex) {
+        if (!hasCompletedCycle) return; // only after full cycle
+        setPrepared(true);
+        setForceShowAll(true);
+        finalizeGroup('left');
+        finalizeGroup('right');
+        stopAnimations();
+        setIsPlaying(true);
+        setPhase(which);
+        const svg = svgRef.current;
+        if (!svg) return;
+        const stepSelector = which === 'left' ? '#step-stroke-left' : '#step-stroke-right';
+        const total = which === 'left' ? pathsLeft.length : pathsRight.length;
+        let delayAcc = 0;
+        const timers = [];
+        for (let i = startIndex; i < total; i++) {
+          const id = setTimeout(() => {
+            setStepIndex(i);
+            requestAnimationFrame(() => {
+              const stepEl = svgRef.current && svgRef.current.querySelector(`${stepSelector} path.stroke-step`);
+              if (!stepEl) return;
+              const len = stepEl.getTotalLength();
+              stepEl.style.strokeDasharray = String(len);
+              stepEl.style.strokeDashoffset = String(len);
+              const dur = Math.max(0.05, len / Math.max(1, speed));
+              try {
+                const anim = stepEl.animate([
+                  { strokeDashoffset: len },
+                  { strokeDashoffset: 0 }
+                ], { duration: dur * 1000, easing: 'ease-in-out', fill: 'forwards' });
+                animRefs.current.push(anim);
+              } catch(_) {}
+            });
+          }, delayAcc * 1000);
+          timers.push(id);
+          // estimate duration per step based on base path length
+          try {
+            const baseEl = svg.querySelector(`${which === 'left' ? '#all-strokes-left' : '#all-strokes-right'} path.stroke:nth-of-type(${i+1})`);
+            const blen = baseEl ? baseEl.getTotalLength() : 300;
+            const bdur = Math.max(0.05, blen / Math.max(1, speed));
+            delayAcc += bdur + gap;
+          } catch(_) { delayAcc += 0.6 + gap; }
+        }
+        const endId = setTimeout(() => { setStepIndex(-1); setIsPlaying(false); }, delayAcc * 1000 + 30);
+        timers.push(endId);
+        stepTimersRef.current.push(...timers);
+      }
+
+      function renderPreviews(paths, label, onClick) {
+        return (
+          <div className="preview-strip">
+            <div className="preview-title">{label}</div>
+            {paths.map((p, i) => (
+              <div key={`${label}-${i}`} className="thumb" onClick={() => onClick(i)} title={`${label} 第 ${i+1} 笔`}>
+                <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+                  <g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <path d={p.d} />
+                  </g>
+                </svg>
+              </div>
+            ))}
+          </div>
+        );
+      }
+
+      return (
+        <div className="stage-wrap">
+          <div className="toolbar" style={{marginTop: 2}}>
+            <button className="btn" onClick={() => { setForceShowAll(false); resetAll(); }}>重置</button>
+            <button className="btn primary" onClick={() => { setForceShowAll(false); playSequential('left', 0); }} disabled={(pathsLeft.length===0 && pathsRight.length===0) || isPlaying}>播放全部</button>
+          </div>
+          <div className="toolbar">
+            <button className="btn" onClick={() => setStepIndex(i => Math.max(0, i-1))}>上一笔</button>
+            <span className="kicker">{phase==='left'?'大写':'小写'} · 分解第 {(phase==='left'?pathsLeft.length:pathsRight.length)===0?0:stepIndex+1} / {(phase==='left'?pathsLeft.length:pathsRight.length)} 笔</span>
+            <button className="btn" onClick={() => setStepIndex(i => Math.min((phase==='left'?pathsLeft.length:pathsRight.length)-1, i+1))}>下一笔</button>
+          </div>
+          <div className="previews">
+            {renderPreviews(showPathsLeft, '大写', (i) => playHighlightSequence('left', i))}
+            {renderPreviews(showPathsRight, '小写', (i) => playHighlightSequence('right', i))}
+          </div>
+          <div className="stage dual">
+            <svg ref={svgRef} className="stage-svg" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
+              <GridOverlay width={1200} height={600} />
+              {/* uppercase left */}
+              <g id="all-strokes-left" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                {showPathsLeft.map(({d, idx}) => (
+                  <path key={`L-${idx}`} className="stroke" d={d} />
+                ))}
+              </g>
+              {/* lowercase right translated */}
+              <g id="all-strokes-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                {showPathsRight.map(({d, idx}) => (
+                  <path key={`R-${idx}`} className="stroke" d={d} />
+                ))}
+              </g>
+              {/* highlight layers */}
+              <g id="step-stroke-left" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                {stepPathsLeft.map(({d, visible, idx}) => (forceShowAll && phase==='left' && idx===stepIndex) || visible ? (
+                  <g key={`HL-${idx}`}>
+                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                  </g>
+                ) : null)}
+              </g>
+              <g id="step-stroke-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                {stepPathsRight.map(({d, visible, idx}) => (forceShowAll && phase==='right' && idx===stepIndex) || visible ? (
+                  <g key={`HR-${idx}`}>
+                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                  </g>
+                ) : null)}
+              </g>
+            </svg>
+          </div>
+          {error && <div className="error">{error}</div>}
+          <div className="legend">画布: 1200×600（左：大写，右：小写）· 四线三格，中间两线相距 150</div>
+        </div>
+      );
+    }
+
+    function StrokeAnimator({ candidates, autoplay=true, settings, playTrigger=0, onComplete }) {
       const [error, setError] = useState('');
       const [paths, setPaths] = useState([]);
       const speed = settings.speed;
@@ -275,6 +572,7 @@
       const svgRef = useRef(null);
       const animRefs = useRef([]);
       const stepTimersRef = useRef([]);
+      const prevTriggerRef = useRef(playTrigger);
 
       useEffect(() => {
         let abort = false;
@@ -305,6 +603,15 @@
         playSequential();
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [paths, speed, gap, strokeWidth, autoplay]);
+
+      // Programmatic trigger: start playback when trigger changes and paths are ready
+      useEffect(() => {
+        if (playTrigger !== prevTriggerRef.current && paths.length > 0 && svgRef.current) {
+          prevTriggerRef.current = playTrigger;
+          resetAll();
+          playSequential(0);
+        }
+      }, [playTrigger, paths]);
 
       function playSequential(fromIndex = 0) {
         stopAnimations();
@@ -363,6 +670,7 @@
           // hide highlight right after the last stroke completes
           setStepIndex(-1);
           setIsPlaying(false);
+          try { onComplete && onComplete(); } catch(_) {}
         }, totalMs);
         stepTimersRef.current.push(endId);
       }
@@ -431,18 +739,6 @@
       );
     }
 
-    function LetterPanel({ letter, label, settings }) {
-      const lower = toLowerRu(letter);
-      const isLower = label === '小写';
-      const cands = useMemo(() => buildSvgCandidates(isLower ? lower : letter, isLower), [letter, label]);
-      return (
-        <div className="panel">
-          <h3>{label}（{isLower ? lower : letter}）</h3>
-          <StrokeAnimator candidates={cands} autoplay={true} settings={settings} />
-        </div>
-      );
-    }
-
     function Detail({ letter, onBack, onToggleSettings, settings }) {
       return (
         <div>
@@ -456,9 +752,14 @@
               <button className="btn" onClick={onToggleSettings}>设置</button>
             </div>
           </div>
-          <div className="detail-layout">
-            <LetterPanel letter={letter} label="大写" settings={settings} />
-            <LetterPanel letter={letter} label="小写" settings={settings} />
+          <div className="panel">
+            <div className="mini-label" style={{margin:'6px 8px 10px'}}>左：大写 · 右：小写（先大写后小写自动播放）</div>
+            <CombinedAnimator
+              candidatesLeft={buildSvgCandidates(letter, false)}
+              candidatesRight={buildSvgCandidates(toLowerRu(letter), true)}
+              autoplay={true}
+              settings={settings}
+            />
           </div>
         </div>
       );
