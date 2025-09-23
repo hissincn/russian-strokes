@@ -732,6 +732,11 @@
         setPrepared(false);
       }
 
+      // Letters that don't need lowercase display (look the same)
+      const currentLetter = decodeURIComponent((location.hash||'').split('/').pop()||'');
+      const noLowercaseLetters = ['ь', 'ы', 'ъ', 'Ь', 'Ы', 'Ъ'];
+      const shouldShowLowercase = !noLowercaseLetters.includes(currentLetter);
+
       const showPathsLeft = useMemo(() => pathsLeft.map((p, idx) => ({ ...p, idx })), [pathsLeft]);
       const showPathsRight = useMemo(() => pathsRight.map((p, idx) => ({ ...p, idx })), [pathsRight]);
       const stepPathsLeft = useMemo(() => pathsLeft.map((p, i) => ({ ...p, visible: phase==='left' && i===stepIndex, idx: i })), [pathsLeft, stepIndex, phase]);
@@ -806,17 +811,17 @@
       return (
         <div className="stage-wrap">
             <div className="letter-display-card">
-            <div className="print-section">
+          <div className="print-section">
               <div className="letter-rows">
                 {/* 大写行 */}
                 <div className="letter-row">
-                  <div className="row-label">大写</div>
+                  {shouldShowLowercase && <div className="row-label">大写</div>}
                   <div 
                     className={`print-letter-card ${activeSegment === 'left' && isPlaying ? 'playing' : ''}`} 
                     onClick={() => { setActiveSegment('left'); playHighlightSequence('left', 0); }}
-                    title="点击播放大写笔顺"
+                    title="点击播放笔顺"
                   >
-                    <span className="print-letter up">{decodeURIComponent((location.hash||'').split('/').pop()||'')}</span>
+              <span className="print-letter up">{decodeURIComponent((location.hash||'').split('/').pop()||'')}</span>
                   </div>
                   <div className="preview-strip">
                     {showPathsLeft.map((p, i) => (
@@ -824,7 +829,7 @@
                         key={`UP-${i}`} 
                         className={`thumb ${activeSegment === 'left' && stepIndex === i ? 'active' : ''}`} 
                         onClick={() => { setActiveSegment('left'); playHighlightSequence('left', i); }} 
-                        title={`大写 第 ${i+1} 笔`}
+                        title={`第 ${i+1} 笔`}
                       >
                         <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
                       </div>
@@ -832,62 +837,68 @@
                   </div>
                 </div>
                 
-                {/* 小写行 */}
-                <div className="letter-row">
-                  <div className="row-label">小写</div>
-                  <div 
-                    className={`print-letter-card ${activeSegment === 'right' && isPlaying ? 'playing' : ''}`} 
-                    onClick={() => { setActiveSegment('right'); playHighlightSequence('right', 0); }}
-                    title="点击播放小写笔顺"
-                  >
-                    <span className="print-letter lo">{toLowerRu(decodeURIComponent((location.hash||'').split('/').pop()||''))}</span>
+                {/* 小写行 - 只对需要的字母显示 */}
+                {shouldShowLowercase && (
+                  <div className="letter-row">
+                    <div className="row-label">小写</div>
+                    <div 
+                      className={`print-letter-card ${activeSegment === 'right' && isPlaying ? 'playing' : ''}`} 
+                      onClick={() => { setActiveSegment('right'); playHighlightSequence('right', 0); }}
+                      title="点击播放小写笔顺"
+                    >
+                      <span className="print-letter lo">{toLowerRu(decodeURIComponent((location.hash||'').split('/').pop()||''))}</span>
+                    </div>
+                    <div className="preview-strip">
+                      {showPathsRight.map((p, i) => (
+                        <div 
+                          key={`LO-${i}`} 
+                          className={`thumb ${activeSegment === 'right' && stepIndex === i ? 'active' : ''}`} 
+                          onClick={() => { setActiveSegment('right'); playHighlightSequence('right', i); }} 
+                          title={`小写 第 ${i+1} 笔`}
+                        >
+                          <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="preview-strip">
-                    {showPathsRight.map((p, i) => (
-                      <div 
-                        key={`LO-${i}`} 
-                        className={`thumb ${activeSegment === 'right' && stepIndex === i ? 'active' : ''}`} 
-                        onClick={() => { setActiveSegment('right'); playHighlightSequence('right', i); }} 
-                        title={`小写 第 ${i+1} 笔`}
-                      >
-                        <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
           <div className="stage dual" style={{marginTop: 6, position: 'relative'}}>
             <svg ref={svgRef} className="stage-svg" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
               <GridOverlay width={1200} height={600} />
-              {/* uppercase left */}
-              <g id="all-strokes-left" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+              {/* uppercase - 如果只有大写则居中显示 */}
+              <g id="all-strokes-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
                 {showPathsLeft.map(({d, idx}) => (
                   <path key={`L-${idx}`} className="stroke" d={d} />
                 ))}
               </g>
-              {/* lowercase right translated */}
-              <g id="all-strokes-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                {showPathsRight.map(({d, idx}) => (
-                  <path key={`R-${idx}`} className="stroke" d={d} />
-                ))}
-              </g>
+              {/* lowercase right - 只对需要的字母显示 */}
+              {shouldShowLowercase && (
+                <g id="all-strokes-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                  {showPathsRight.map(({d, idx}) => (
+                    <path key={`R-${idx}`} className="stroke" d={d} />
+                  ))}
+                </g>
+              )}
               {/* highlight layers */}
-              <g id="step-stroke-left" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+              <g id="step-stroke-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
                 {stepPathsLeft.map(({d, visible, idx}) => (forceShowAll && phase==='left' && idx===stepIndex) || visible ? (
                   <g key={`HL-${idx}`}>
                     <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
                   </g>
                 ) : null)}
               </g>
-              <g id="step-stroke-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                {stepPathsRight.map(({d, visible, idx}) => (forceShowAll && phase==='right' && idx===stepIndex) || visible ? (
-                  <g key={`HR-${idx}`}>
-                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
-                  </g>
-                ) : null)}
-              </g>
+              {shouldShowLowercase && (
+                <g id="step-stroke-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                  {stepPathsRight.map(({d, visible, idx}) => (forceShowAll && phase==='right' && idx===stepIndex) || visible ? (
+                    <g key={`HR-${idx}`}>
+                      <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                    </g>
+                  ) : null)}
+                </g>
+              )}
             </svg>
             <button 
               className="canvas-replay-btn" 
