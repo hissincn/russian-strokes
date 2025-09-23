@@ -654,9 +654,9 @@
     /* No special styling for previews in new layout */
   </style>
   <!-- React + ReactDOM + Babel (standalone JSX transform) -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="js/react.development.js"></script>
+  <script crossorigin src="js/react-dom.development.js"></script>
+  <script crossorigin src="js/babel.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -784,7 +784,7 @@
     }
 
     // Combined animator: one SVG, left uppercase (0~600), right lowercase (translated +600), chain playback
-    function CombinedAnimator({ letter, candidatesLeft, candidatesRight, autoplay=true, settings, globalReplayTrigger=0, setGlobalReplayTick, setShowSettings }) {
+    function CombinedAnimator({ letter, candidatesLeft, candidatesRight, isSingle=false, autoplay=true, settings, globalReplayTrigger=0, setGlobalReplayTick, setShowSettings }) {
       const [error, setError] = useState('');
       const [pathsLeft, setPathsLeft] = useState([]);
       const [pathsRight, setPathsRight] = useState([]);
@@ -819,24 +819,25 @@
         (async () => {
           setError(''); setIsPlaying(false); setStepIndex(0); setPhase('left'); setActiveSegment(''); setPrepared(false); setHasCompletedCycle(false);
           setPathsLeft([]); setPathsRight([]);
-          const [foundL, foundR] = await Promise.all([
-            fetchFirstOk(candidatesLeft),
-            fetchFirstOk(candidatesRight)
-          ]);
+          const foundL = await fetchFirstOk(candidatesLeft);
+          let foundR = null;
+          if (!isSingle) {
+            foundR = await fetchFirstOk(candidatesRight);
+          }
           if (abort) return;
           if (!foundL) { setError('未找到大写 SVG'); return; }
-          if (!foundR) { setError('未找到小写 SVG'); return; }
+          if (!isSingle && !foundR) { setError('未找到小写 SVG'); return; }
           const parsedL = new DOMParser().parseFromString(foundL.text, 'image/svg+xml');
-          const parsedR = new DOMParser().parseFromString(foundR.text, 'image/svg+xml');
+          const parsedR = !isSingle && foundR ? new DOMParser().parseFromString(foundR.text, 'image/svg+xml') : null;
           const dListL = Array.from(parsedL.querySelectorAll('path')).map(p => p.getAttribute('d')).filter(Boolean);
-          const dListR = Array.from(parsedR.querySelectorAll('path')).map(p => p.getAttribute('d')).filter(Boolean);
+          const dListR = parsedR ? Array.from(parsedR.querySelectorAll('path')).map(p => p.getAttribute('d')).filter(Boolean) : [];
           if (dListL.length === 0) { setError('大写 SVG 中未包含 path'); return; }
-          if (dListR.length === 0) { setError('小写 SVG 中未包含 path'); return; }
+          if (!isSingle && dListR.length === 0) { setError('小写 SVG 中未包含 path'); return; }
           setPathsLeft(dListL.map(d => ({ d })));
-          setPathsRight(dListR.map(d => ({ d })));
+          setPathsRight((dListR || []).map(d => ({ d })));
         })();
         return () => { abort = true; stopAnimations(); };
-      }, [JSON.stringify(candidatesLeft), JSON.stringify(candidatesRight)]);
+      }, [JSON.stringify(candidatesLeft), JSON.stringify(candidatesRight), isSingle]);
 
       function stopAnimations() {
         animRefs.current.forEach(a => { try { a.cancel(); } catch(_){} });
@@ -958,601 +959,620 @@
       const russianAlphabet = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й', 'К', 'Л', 'М', 'Н', 'О', 'П', 'Р', 'С', 'Т', 'У', 'Ф', 'Х', 'Ц', 'Ч', 'Ш', 'Щ', 'Ъ', 'Ы', 'Ь', 'Э', 'Ю', 'Я'];
       
       // Letters that don't need lowercase display (look the same)
-      const currentLetter = letter;
-      const noLowercaseLetters = ['ь', 'ы', 'ъ', 'Ь', 'Ы', 'Ъ'];
-      const shouldShowLowercase = !noLowercaseLetters.includes(currentLetter);
-      
-      // Get current letter index and navigation info
-      const currentIndex = russianAlphabet.findIndex(letter => letter === currentLetter.toUpperCase());
-      const hasPrevLetter = currentIndex > 0;
-      const hasNextLetter = currentIndex < russianAlphabet.length - 1;
-      const prevLetter = hasPrevLetter ? russianAlphabet[currentIndex - 1] : null;
-      const nextLetter = hasNextLetter ? russianAlphabet[currentIndex + 1] : null;
+       const currentLetter = letter;
+       const noLowercaseLetters = ['ь', 'ы', 'ъ', 'Ь', 'Ы', 'Ъ'];
+       const shouldShowLowercase = !isSingle && !noLowercaseLetters.includes(currentLetter);
+       
+       // Get current letter index and navigation info
+       const currentIndex = russianAlphabet.findIndex(letter => letter === currentLetter.toUpperCase());
+       const hasPrevLetter = currentIndex > 0;
+       const hasNextLetter = currentIndex < russianAlphabet.length - 1;
+       const prevLetter = hasPrevLetter ? russianAlphabet[currentIndex - 1] : null;
+       const nextLetter = hasNextLetter ? russianAlphabet[currentIndex + 1] : null;
 
-      const showPathsLeft = useMemo(() => pathsLeft.map((p, idx) => ({ ...p, idx })), [pathsLeft]);
-      const showPathsRight = useMemo(() => pathsRight.map((p, idx) => ({ ...p, idx })), [pathsRight]);
-      const stepPathsLeft = useMemo(() => pathsLeft.map((p, i) => ({ ...p, visible: phase==='left' && i===stepIndex, idx: i })), [pathsLeft, stepIndex, phase]);
-      const stepPathsRight = useMemo(() => pathsRight.map((p, i) => ({ ...p, visible: phase==='right' && i===stepIndex, idx: i })), [pathsRight, stepIndex, phase]);
+       const showPathsLeft = useMemo(() => pathsLeft.map((p, idx) => ({ ...p, idx })), [pathsLeft]);
+       const showPathsRight = useMemo(() => pathsRight.map((p, idx) => ({ ...p, idx })), [pathsRight]);
+       const stepPathsLeft = useMemo(() => pathsLeft.map((p, i) => ({ ...p, visible: phase==='left' && i===stepIndex, idx: i })), [pathsLeft, stepIndex, phase]);
+       const stepPathsRight = useMemo(() => pathsRight.map((p, i) => ({ ...p, visible: phase==='right' && i===stepIndex, idx: i })), [pathsRight, stepIndex, phase]);
 
-      // 切换到下一笔画
-      function nextStroke() {
-        if (!hasCompletedCycle) return;
-        
-        if (phase === 'left') {
-          if (stepIndex < pathsLeft.length - 1) {
-            playHighlightSequence('left', stepIndex + 1);
-          } else if (shouldShowLowercase) {
-            // 切换到小写第一笔
-            playHighlightSequence('right', 0);
-          }
-        } else if (phase === 'right') {
-          if (stepIndex < pathsRight.length - 1) {
-            playHighlightSequence('right', stepIndex + 1);
-          }
-        }
-      }
+       // 切换到下一笔画
+       function nextStroke() {
+         if (!hasCompletedCycle) return;
+         
+         if (phase === 'left') {
+           if (stepIndex < pathsLeft.length - 1) {
+             playHighlightSequence('left', stepIndex + 1);
+           } else if (shouldShowLowercase) {
+             // 切换到小写第一笔
+             playHighlightSequence('right', 0);
+           }
+         } else if (phase === 'right') {
+           if (stepIndex < pathsRight.length - 1) {
+             playHighlightSequence('right', stepIndex + 1);
+           }
+         }
+       }
 
-      // 切换到上一笔画
-      function previousStroke() {
-        if (!hasCompletedCycle) return;
-        
-        if (phase === 'right') {
-          if (stepIndex > 0) {
-            playHighlightSequence('right', stepIndex - 1);
-          } else {
-            // 切换到大写最后一笔
-            playHighlightSequence('left', pathsLeft.length - 1);
-          }
-        } else if (phase === 'left') {
-          if (stepIndex > 0) {
-            playHighlightSequence('left', stepIndex - 1);
-          }
-        }
-      }
+       // 切换到上一笔画
+       function previousStroke() {
+         if (!hasCompletedCycle) return;
+         
+         if (phase === 'right') {
+           if (stepIndex > 0) {
+             playHighlightSequence('right', stepIndex - 1);
+           } else {
+             // 切换到大写最后一笔
+             playHighlightSequence('left', pathsLeft.length - 1);
+           }
+         } else if (phase === 'left') {
+           if (stepIndex > 0) {
+             playHighlightSequence('left', stepIndex - 1);
+           }
+         }
+       }
 
-      // 字母导航函数
-      function navigateToLetter(letter) {
-        if (letter) {
-          window.location.hash = `/${encodeURIComponent(letter)}`;
-        }
-      }
+       // 字母导航函数
+       function navigateToLetter(letter) {
+         if (letter) {
+           window.location.hash = `/${encodeURIComponent(letter)}`;
+         }
+       }
 
-      function goToPreviousLetter() {
-        if (prevLetter) {
-          navigateToLetter(prevLetter);
-        }
-      }
+       function goToPreviousLetter() {
+         if (prevLetter) {
+           navigateToLetter(prevLetter);
+         }
+       }
 
-      function goToNextLetter() {
-        if (nextLetter) {
-          navigateToLetter(nextLetter);
-        }
-      }
+       function goToNextLetter() {
+         if (nextLetter) {
+           navigateToLetter(nextLetter);
+         }
+       }
 
-      // 键盘控制笔画切换
-      useEffect(() => {
-        function handleKeydown(e) {
-          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-          
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            previousStroke();
-          } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            nextStroke();
-          } else if (e.key === 'PageUp' || (e.ctrlKey && e.key === 'ArrowLeft')) {
-            e.preventDefault();
-            goToPreviousLetter();
-          } else if (e.key === 'PageDown' || (e.ctrlKey && e.key === 'ArrowRight')) {
-            e.preventDefault();
-            goToNextLetter();
-          }
-        }
-        
-        document.addEventListener('keydown', handleKeydown);
-        return () => document.removeEventListener('keydown', handleKeydown);
-      }, [phase, stepIndex, pathsLeft, pathsRight, shouldShowLowercase, hasCompletedCycle, prevLetter, nextLetter]);
+       // 键盘控制笔画切换
+       useEffect(() => {
+         function handleKeydown(e) {
+           if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+           
+           if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+             e.preventDefault();
+             previousStroke();
+           } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+             e.preventDefault();
+             nextStroke();
+           } else if (e.key === 'PageUp' || (e.ctrlKey && e.key === 'ArrowLeft')) {
+             e.preventDefault();
+             goToPreviousLetter();
+           } else if (e.key === 'PageDown' || (e.ctrlKey && e.key === 'ArrowRight')) {
+             e.preventDefault();
+             goToNextLetter();
+           }
+         }
+         
+         document.addEventListener('keydown', handleKeydown);
+         return () => document.removeEventListener('keydown', handleKeydown);
+       }, [phase, stepIndex, pathsLeft, pathsRight, shouldShowLowercase, hasCompletedCycle, prevLetter, nextLetter]);
 
-      function playHighlightSequence(which, startIndex) {
-        if (!hasCompletedCycle) return; // only after full cycle
-        setPrepared(true);
-        setForceShowAll(true);
-        finalizeGroup('left');
-        finalizeGroup('right');
-        stopAnimations();
-        setIsPlaying(true);
-        setPhase(which);
-        setActiveSegment(which);
-        const svg = svgRef.current;
-        if (!svg) return;
-        const stepSelector = which === 'left' ? '#step-stroke-left' : '#step-stroke-right';
-        const total = which === 'left' ? pathsLeft.length : pathsRight.length;
-        let delayAcc = 0;
-        const timers = [];
-        for (let i = startIndex; i < total; i++) {
-          const id = setTimeout(() => {
-            setStepIndex(i);
-            requestAnimationFrame(() => {
-              const stepEl = svgRef.current && svgRef.current.querySelector(`${stepSelector} path.stroke-step`);
-              if (!stepEl) return;
-              const len = stepEl.getTotalLength();
-              stepEl.style.strokeDasharray = String(len);
-              stepEl.style.strokeDashoffset = String(len);
-              const dur = Math.max(0.05, len / Math.max(1, speed));
-              try {
-                const anim = stepEl.animate([
-                  { strokeDashoffset: len },
-                  { strokeDashoffset: 0 }
-                ], { duration: dur * 1000, easing: 'ease-in-out', fill: 'forwards' });
-                animRefs.current.push(anim);
-              } catch(_) {}
-            });
-          }, delayAcc * 1000);
-          timers.push(id);
-          // estimate duration per step based on base path length
-          try {
-            const baseEl = svg.querySelector(`${which === 'left' ? '#all-strokes-left' : '#all-strokes-right'} path.stroke:nth-of-type(${i+1})`);
-            const blen = baseEl ? baseEl.getTotalLength() : 300;
-            const bdur = Math.max(0.05, blen / Math.max(1, speed));
-            delayAcc += bdur + gap;
-          } catch(_) { delayAcc += 0.6 + gap; }
-        }
-        const endId = setTimeout(() => { setStepIndex(-1); setIsPlaying(false); }, delayAcc * 1000 + 30);
-        timers.push(endId);
-        stepTimersRef.current.push(...timers);
-      }
+       function playHighlightSequence(which, startIndex) {
+         if (!hasCompletedCycle) return; // only after full cycle
+         setPrepared(true);
+         setForceShowAll(true);
+         finalizeGroup('left');
+         finalizeGroup('right');
+         stopAnimations();
+         setIsPlaying(true);
+         setPhase(which);
+         setActiveSegment(which);
+         const svg = svgRef.current;
+         if (!svg) return;
+         const stepSelector = which === 'left' ? '#step-stroke-left' : '#step-stroke-right';
+         const total = which === 'left' ? pathsLeft.length : pathsRight.length;
+         let delayAcc = 0;
+         const timers = [];
+         for (let i = startIndex; i < total; i++) {
+           const id = setTimeout(() => {
+             setStepIndex(i);
+             requestAnimationFrame(() => {
+               const stepEl = svgRef.current && svgRef.current.querySelector(`${stepSelector} path.stroke-step`);
+               if (!stepEl) return;
+               const len = stepEl.getTotalLength();
+               stepEl.style.strokeDasharray = String(len);
+               stepEl.style.strokeDashoffset = String(len);
+               const dur = Math.max(0.05, len / Math.max(1, speed));
+               try {
+                 const anim = stepEl.animate([
+                   { strokeDashoffset: len },
+                   { strokeDashoffset: 0 }
+                 ], { duration: dur * 1000, easing: 'ease-in-out', fill: 'forwards' });
+                 animRefs.current.push(anim);
+               } catch(_) {}
+             });
+           }, delayAcc * 1000);
+           timers.push(id);
+           // estimate duration per step based on base path length
+           try {
+             const baseEl = svg.querySelector(`${which === 'left' ? '#all-strokes-left' : '#all-strokes-right'} path.stroke:nth-of-type(${i+1})`);
+             const blen = baseEl ? baseEl.getTotalLength() : 300;
+             const bdur = Math.max(0.05, blen / Math.max(1, speed));
+             delayAcc += bdur + gap;
+           } catch(_) { delayAcc += 0.6 + gap; }
+         }
+         const endId = setTimeout(() => { setStepIndex(-1); setIsPlaying(false); }, delayAcc * 1000 + 30);
+         timers.push(endId);
+         stepTimersRef.current.push(...timers);
+       }
 
-      function renderPreviews(paths, label, onClick) {
-        return (
-          <div className="preview-strip">
-            <div className="preview-title">{label}</div>
-            {paths.map((p, i) => (
-              <div key={`${label}-${i}`} className="thumb" onClick={() => onClick(i)} title={`${label} 第 ${i+1} 笔`}>
-                <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
-                  <g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={p.d} />
-                  </g>
-                </svg>
-              </div>
-            ))}
-          </div>
-        );
-      }
+       function renderPreviews(paths, label, onClick) {
+         return (
+           <div className="preview-strip">
+             <div className="preview-title">{label}</div>
+             {paths.map((p, i) => (
+               <div key={`${label}-${i}`} className="thumb" onClick={() => onClick(i)} title={`${label} 第 ${i+1} 笔`}>
+                 <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+                   <g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                     <path d={p.d} />
+                   </g>
+                 </svg>
+               </div>
+             ))}
+           </div>
+         );
+       }
 
-      return (
-        <div className="stage-wrap">
-          {/* 字母导航 */}
-          <div className="letter-nav">
-            <button 
-              className="letter-nav-btn prev" 
-              onClick={goToPreviousLetter}
-              disabled={!hasPrevLetter}
-              title={`上一字母 (${prevLetter ? `${prevLetter}/${noLowercaseLetters.includes(prevLetter) ? '' : toLowerRu(prevLetter)}` : ''})`}
-            >
-              <span className="nav-arrow">‹</span>
-              {prevLetter && (
-                <div className="letter-preview">
-                  <div className="letter-upper">{prevLetter}</div>
-                  {!noLowercaseLetters.includes(prevLetter) && (
-                    <div className="letter-lower">{toLowerRu(prevLetter)}</div>
-                  )}
-                </div>
-              )}
-            </button>
-            
-            <div className="current-letter-info">
-              {currentIndex + 1} / {russianAlphabet.length}
-            </div>
-            
-            <button 
-              className="letter-nav-btn next" 
-              onClick={goToNextLetter}
-              disabled={!hasNextLetter}
-              title={`下一字母 (${nextLetter ? `${nextLetter}/${noLowercaseLetters.includes(nextLetter) ? '' : toLowerRu(nextLetter)}` : ''})`}
-            >
-              {nextLetter && (
-                <div className="letter-preview">
-                  <div className="letter-upper">{nextLetter}</div>
-                  {!noLowercaseLetters.includes(nextLetter) && (
-                    <div className="letter-lower">{toLowerRu(nextLetter)}</div>
-                  )}
-                </div>
-              )}
-              <span className="nav-arrow">›</span>
-            </button>
-          </div>
-          
-          <div className="letter-display-card">
-          <div className="print-section">
-              <div className="letter-rows">
-                {/* 大写行 */}
-                <div className="letter-row">
-                  <div 
-                    className={`print-letter-card ${activeSegment === 'left' && isPlaying ? 'playing' : ''}`} 
-                    onClick={() => { setActiveSegment('left'); playHighlightSequence('left', 0); }}
-                    title="点击播放笔顺"
-                  >
-                    {shouldShowLowercase && <div className="letter-badge">大写</div>}
-                    <span className="print-letter up">{currentLetter}</span>
-                  </div>
-                  <div className="preview-strip">
-                    {showPathsLeft.map((p, i) => (
-                      <div 
-                        key={`UP-${i}`} 
-                        className={`thumb ${activeSegment === 'left' && stepIndex === i ? 'active' : ''}`} 
-                        onClick={() => { setActiveSegment('left'); playHighlightSequence('left', i); }} 
-                        title={`第 ${i+1} 笔`}
-                      >
-                        <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* 小写行 - 只对需要的字母显示 */}
-                {shouldShowLowercase && (
-                  <div className="letter-row">
-                    <div 
-                      className={`print-letter-card ${activeSegment === 'right' && isPlaying ? 'playing' : ''}`} 
-                      onClick={() => { setActiveSegment('right'); playHighlightSequence('right', 0); }}
-                      title="点击播放小写笔顺"
-                    >
-                      <div className="letter-badge">小写</div>
-                      <span className="print-letter lo">{toLowerRu(currentLetter)}</span>
-                    </div>
-                    <div className="preview-strip">
-                      {showPathsRight.map((p, i) => (
-                        <div 
-                          key={`LO-${i}`} 
-                          className={`thumb ${activeSegment === 'right' && stepIndex === i ? 'active' : ''}`} 
-                          onClick={() => { setActiveSegment('right'); playHighlightSequence('right', i); }} 
-                          title={`小写 第 ${i+1} 笔`}
-                        >
-                          <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="stage dual" style={{marginTop: 6}}>
-            <svg ref={svgRef} className="stage-svg" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
-              <GridOverlay width={1200} height={600} />
-              {/* uppercase - 如果只有大写则居中显示 */}
-              <g id="all-strokes-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                {showPathsLeft.map(({d, idx}) => (
-                  <path key={`L-${idx}`} className="stroke" d={d} />
-                ))}
-              </g>
-              {/* lowercase right - 只对需要的字母显示 */}
-              {shouldShowLowercase && (
-                <g id="all-strokes-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                  {showPathsRight.map(({d, idx}) => (
-                    <path key={`R-${idx}`} className="stroke" d={d} />
-                  ))}
-                </g>
-              )}
-              {/* highlight layers */}
-              <g id="step-stroke-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                {stepPathsLeft.map(({d, visible, idx}) => (forceShowAll && phase==='left' && idx===stepIndex) || visible ? (
-                  <g key={`HL-${idx}`}>
-                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
-                  </g>
-                ) : null)}
-              </g>
-              {shouldShowLowercase && (
-                <g id="step-stroke-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
-                  {stepPathsRight.map(({d, visible, idx}) => (forceShowAll && phase==='right' && idx===stepIndex) || visible ? (
-                    <g key={`HR-${idx}`}>
-                      <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
-                    </g>
-                  ) : null)}
-                </g>
-              )}
-            </svg>
-          </div>
-          
-          {/* 画布控制区域 */}
-          <div className="canvas-controls">
-            <button 
-              className="canvas-replay-btn" 
-              onClick={() => setGlobalReplayTick(t=>t+1)}
-              title="重播动画"
-            >
-              ↻
-            </button>
-            
-            {/* 笔画导航按钮 */}
-            {hasCompletedCycle && (phase === 'left' || phase === 'right') && (
-              <div className="stroke-nav-btns">
-                <button 
-                  className="stroke-nav-btn prev" 
-                  onClick={previousStroke}
-                  disabled={phase === 'left' && stepIndex === 0}
-                  title="上一笔 (←/↑)"
-                >
-                  ←
-                </button>
-                <span className="stroke-indicator">
-                  {stepIndex + 1} / {phase === 'left' ? pathsLeft.length : pathsRight.length}
-                  {shouldShowLowercase && ` (${phase === 'left' ? '大写' : '小写'})`}
-                </span>
-                <button 
-                  className="stroke-nav-btn next" 
-                  onClick={nextStroke}
-                  disabled={(phase === 'left' && stepIndex === pathsLeft.length - 1 && !shouldShowLowercase) || 
-                           (phase === 'right' && stepIndex === pathsRight.length - 1)}
-                  title="下一笔 (→/↓)"
-                >
-                  →
-                </button>
-              </div>
-            )}
-          </div>
-          {error && <div className="error">{error}</div>}
-        </div>
-      );
-    }
+       return (
+         <div className="stage-wrap">
+           {/* 字母导航 */}
+           <div className="letter-nav">
+             <button 
+               className="letter-nav-btn prev" 
+               onClick={goToPreviousLetter}
+               disabled={!hasPrevLetter}
+               title={`上一字母 (${prevLetter ? `${prevLetter}/${noLowercaseLetters.includes(prevLetter) ? '' : toLowerRu(prevLetter)}` : ''})`}
+             >
+               <span className="nav-arrow">‹</span>
+               {prevLetter && (
+                 <div className="letter-preview">
+                   <div className="letter-upper">{prevLetter}</div>
+                   {!noLowercaseLetters.includes(prevLetter) && (
+                     <div className="letter-lower">{toLowerRu(prevLetter)}</div>
+                   )}
+                 </div>
+               )}
+             </button>
+             
+             <div className="current-letter-info">
+               {currentIndex + 1} / {russianAlphabet.length}
+             </div>
+             
+             <button 
+               className="letter-nav-btn next" 
+               onClick={goToNextLetter}
+               disabled={!hasNextLetter}
+               title={`下一字母 (${nextLetter ? `${nextLetter}/${noLowercaseLetters.includes(nextLetter) ? '' : toLowerRu(nextLetter)}` : ''})`}
+             >
+               {nextLetter && (
+                 <div className="letter-preview">
+                   <div className="letter-upper">{nextLetter}</div>
+                   {!noLowercaseLetters.includes(nextLetter) && (
+                     <div className="letter-lower">{toLowerRu(nextLetter)}</div>
+                   )}
+                 </div>
+               )}
+               <span className="nav-arrow">›</span>
+             </button>
+           </div>
+           
+           <div className="letter-display-card">
+           <div className="print-section">
+               <div className="letter-rows">
+                 {/* 大写行 */}
+                 <div className="letter-row">
+                   <div 
+                     className={`print-letter-card ${activeSegment === 'left' && isPlaying ? 'playing' : ''}`} 
+                     onClick={() => { setActiveSegment('left'); playHighlightSequence('left', 0); }}
+                     title="点击播放笔顺"
+                   >
+                     {shouldShowLowercase && <div className="letter-badge">大写</div>}
+                     <span className="print-letter up">{currentLetter}</span>
+                   </div>
+                   <div className="preview-strip">
+                     {showPathsLeft.map((p, i) => (
+                       <div 
+                         key={`UP-${i}`} 
+                         className={`thumb ${activeSegment === 'left' && stepIndex === i ? 'active' : ''}`} 
+                         onClick={() => { setActiveSegment('left'); playHighlightSequence('left', i); }} 
+                         title={`第 ${i+1} 笔`}
+                       >
+                         <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+                 
+                 {/* 小写行 - 只对需要的字母显示 */}
+                 {shouldShowLowercase && (
+                   <div className="letter-row">
+                     <div 
+                       className={`print-letter-card ${activeSegment === 'right' && isPlaying ? 'playing' : ''}`} 
+                       onClick={() => { setActiveSegment('right'); playHighlightSequence('right', 0); }}
+                       title="点击播放小写笔顺"
+                     >
+                       <div className="letter-badge">小写</div>
+                       <span className="print-letter lo">{toLowerRu(currentLetter)}</span>
+                     </div>
+                     <div className="preview-strip">
+                       {showPathsRight.map((p, i) => (
+                         <div 
+                           key={`LO-${i}`} 
+                           className={`thumb ${activeSegment === 'right' && stepIndex === i ? 'active' : ''}`} 
+                           onClick={() => { setActiveSegment('right'); playHighlightSequence('right', i); }} 
+                           title={`小写 第 ${i+1} 笔`}
+                         >
+                           <svg width="36" height="36" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" strokeWidth="40" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d={p.d} /></g></svg>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+               </div>
+             </div>
+           </div>
+           <div className="stage dual" style={{marginTop: 6}}>
+             <svg ref={svgRef} className="stage-svg" viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
+               <GridOverlay width={1200} height={600} />
+               {/* uppercase - 如果只有大写则居中显示 */}
+               <g id="all-strokes-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                 {showPathsLeft.map(({d, idx}) => (
+                   <path key={`L-${idx}`} className="stroke" d={d} />
+                 ))}
+               </g>
+               {/* lowercase right - 只对需要的字母显示 */}
+               {shouldShowLowercase && (
+                 <g id="all-strokes-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#000'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                   {showPathsRight.map(({d, idx}) => (
+                     <path key={`R-${idx}`} className="stroke" d={d} />
+                   ))}
+                 </g>
+               )}
+               {/* highlight layers */}
+               <g id="step-stroke-left" transform={shouldShowLowercase ? "" : "translate(300,0)"} stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                 {stepPathsLeft.map(({d, visible, idx}) => (forceShowAll && phase==='left' && idx===stepIndex) || visible ? (
+                   <g key={`HL-${idx}`}>
+                     <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                   </g>
+                 ) : null)}
+               </g>
+               {shouldShowLowercase && (
+                 <g id="step-stroke-right" transform="translate(600,0)" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round" style={{opacity: (prepared || forceShowAll) ? 1 : 0}}>
+                   {stepPathsRight.map(({d, visible, idx}) => (forceShowAll && phase==='right' && idx===stepIndex) || visible ? (
+                     <g key={`HR-${idx}`}>
+                       <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                     </g>
+                   ) : null)}
+                 </g>
+               )}
+             </svg>
+           </div>
+           
+           {/* 画布控制区域 */}
+           <div className="canvas-controls">
+             <button 
+               className="canvas-replay-btn" 
+               onClick={() => setGlobalReplayTick(t=>t+1)}
+               title="重播动画"
+             >
+               ↻
+             </button>
+             
+             {/* 笔画导航按钮 */}
+             {hasCompletedCycle && (phase === 'left' || phase === 'right') && (
+               <div className="stroke-nav-btns">
+                 <button 
+                   className="stroke-nav-btn prev" 
+                   onClick={previousStroke}
+                   disabled={phase === 'left' && stepIndex === 0}
+                   title="上一笔 (←/↑)"
+                 >
+                   ←
+                 </button>
+                 <span className="stroke-indicator">
+                   {stepIndex + 1} / {phase === 'left' ? pathsLeft.length : pathsRight.length}
+                   {shouldShowLowercase && ` (${phase === 'left' ? '大写' : '小写'})`}
+                 </span>
+                 <button 
+                   className="stroke-nav-btn next" 
+                   onClick={nextStroke}
+                   disabled={(phase === 'left' && stepIndex === pathsLeft.length - 1 && !shouldShowLowercase) || 
+                            (phase === 'right' && stepIndex === pathsRight.length - 1)}
+                   title="下一笔 (→/↓)"
+                 >
+                   →
+                 </button>
+               </div>
+             )}
+           </div>
+           {error && <div className="error">{error}</div>}
+         </div>
+       );
+     }
 
-    function StrokeAnimator({ candidates, autoplay=true, settings, playTrigger=0, onComplete }) {
-      const [error, setError] = useState('');
-      const [paths, setPaths] = useState([]);
-      const speed = settings.speed;
-      const gap = settings.gap;
-      const strokeWidth = settings.width;
-      const [stepIndex, setStepIndex] = useState(0);
-      const [isPlaying, setIsPlaying] = useState(false);
-      const svgRef = useRef(null);
-      const animRefs = useRef([]);
-      const stepTimersRef = useRef([]);
-      const prevTriggerRef = useRef(playTrigger);
+     function StrokeAnimator({ candidates, autoplay=true, settings, playTrigger=0, onComplete }) {
+       const [error, setError] = useState('');
+       const [paths, setPaths] = useState([]);
+       const speed = settings.speed;
+       const gap = settings.gap;
+       const strokeWidth = settings.width;
+       const [stepIndex, setStepIndex] = useState(0);
+       const [isPlaying, setIsPlaying] = useState(false);
+       const svgRef = useRef(null);
+       const animRefs = useRef([]);
+       const stepTimersRef = useRef([]);
+       const prevTriggerRef = useRef(playTrigger);
 
-      useEffect(() => {
-        let abort = false;
-        (async () => {
-          setError(''); setPaths([]); setIsPlaying(false); setStepIndex(0);
-          const found = await fetchFirstOk(candidates);
-          if (abort) return;
-          if (!found) { setError('未找到对应的 SVG 文件'); return; }
-          const parsed = new DOMParser().parseFromString(found.text, 'image/svg+xml');
-          const dList = Array.from(parsed.querySelectorAll('path'))
-            .map(p => p.getAttribute('d'))
-            .filter(Boolean);
-          if (dList.length === 0) { setError('SVG 中未包含 path'); return; }
-          setPaths(dList.map(d => ({ d })));
-        })();
-        return () => { abort = true; stopAnimations(); };
-      }, [JSON.stringify(candidates)]);
+       useEffect(() => {
+         let abort = false;
+         (async () => {
+           setError(''); setPaths([]); setIsPlaying(false); setStepIndex(0);
+           const found = await fetchFirstOk(candidates);
+           if (abort) return;
+           if (!found) { setError('未找到对应的 SVG 文件'); return; }
+           const parsed = new DOMParser().parseFromString(found.text, 'image/svg+xml');
+           const dList = Array.from(parsed.querySelectorAll('path'))
+             .map(p => p.getAttribute('d'))
+             .filter(Boolean);
+           if (dList.length === 0) { setError('SVG 中未包含 path'); return; }
+           setPaths(dList.map(d => ({ d })));
+         })();
+         return () => { abort = true; stopAnimations(); };
+       }, [JSON.stringify(candidates)]);
 
-      function stopAnimations() {
-        animRefs.current.forEach(a => { try { a.cancel(); } catch(_){} });
-        animRefs.current = [];
-        stepTimersRef.current.forEach(id => { try { clearTimeout(id); } catch(_){} });
-        stepTimersRef.current = [];
-      }
+       function stopAnimations() {
+         animRefs.current.forEach(a => { try { a.cancel(); } catch(_){} });
+         animRefs.current = [];
+         stepTimersRef.current.forEach(id => { try { clearTimeout(id); } catch(_){} });
+         stepTimersRef.current = [];
+       }
 
-      useEffect(() => {
-        if (!autoplay || paths.length === 0) return;
-        playSequential();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [paths, speed, gap, strokeWidth, autoplay]);
+       useEffect(() => {
+         if (!autoplay || paths.length === 0) return;
+         playSequential();
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+       }, [paths, speed, gap, strokeWidth, autoplay]);
 
-      // Programmatic trigger: start playback when trigger changes and paths are ready
-      useEffect(() => {
-        if (playTrigger !== prevTriggerRef.current && paths.length > 0 && svgRef.current) {
-          prevTriggerRef.current = playTrigger;
-          resetAll();
-          playSequential(0);
-        }
-      }, [playTrigger, paths]);
+       // Programmatic trigger: start playback when trigger changes and paths are ready
+       useEffect(() => {
+         if (playTrigger !== prevTriggerRef.current && paths.length > 0 && svgRef.current) {
+           prevTriggerRef.current = playTrigger;
+           resetAll();
+           playSequential(0);
+         }
+       }, [playTrigger, paths]);
 
-      function playSequential(fromIndex = 0) {
-        stopAnimations();
-        setIsPlaying(true);
-        const svg = svgRef.current;
-        if (!svg) return;
-        const pathEls = Array.from(svg.querySelectorAll('#all-strokes path.stroke'));
-        let delayAcc = 0;
-        const durations = [];
-        const lengths = [];
-        for (let i = 0; i < pathEls.length; i++) {
-          const el = pathEls[i];
-          const length = el.getTotalLength();
-          lengths[i] = length;
-          el.style.strokeDasharray = String(length);
-          el.style.strokeDashoffset = String(length);
-          const dur = Math.max(0.05, length / Math.max(1, speed));
-          durations[i] = dur;
-          const delay = i < fromIndex ? 0 : delayAcc;
-          const anim = el.animate([
-            { strokeDashoffset: length },
-            { strokeDashoffset: 0 }
-          ], { duration: dur * 1000, delay: delay * 1000, easing: 'ease-in-out', fill: 'forwards' });
-          animRefs.current.push(anim);
-          if (i >= fromIndex) delayAcc += dur + gap;
-        }
+       function playSequential(fromIndex = 0) {
+         stopAnimations();
+         setIsPlaying(true);
+         const svg = svgRef.current;
+         if (!svg) return;
+         const pathEls = Array.from(svg.querySelectorAll('#all-strokes path.stroke'));
+         let delayAcc = 0;
+         const durations = [];
+         const lengths = [];
+         for (let i = 0; i < pathEls.length; i++) {
+           const el = pathEls[i];
+           const length = el.getTotalLength();
+           lengths[i] = length;
+           el.style.strokeDasharray = String(length);
+           el.style.strokeDashoffset = String(length);
+           const dur = Math.max(0.05, length / Math.max(1, speed));
+           durations[i] = dur;
+           const delay = i < fromIndex ? 0 : delayAcc;
+           const anim = el.animate([
+             { strokeDashoffset: length },
+             { strokeDashoffset: 0 }
+           ], { duration: dur * 1000, delay: delay * 1000, easing: 'ease-in-out', fill: 'forwards' });
+           animRefs.current.push(anim);
+           if (i >= fromIndex) delayAcc += dur + gap;
+         }
 
-        // Schedule highlight (glow) per stroke from the very beginning
-        let startAcc = 0;
-        for (let i = fromIndex; i < pathEls.length; i++) {
-          const startMs = startAcc * 1000;
-          const id = setTimeout(() => {
-            setStepIndex(i);
-            // animate the step layer in sync
-            requestAnimationFrame(() => {
-              const stepEl = svgRef.current && svgRef.current.querySelector('#step-stroke path.stroke-step');
-              if (!stepEl) return;
-              const len = stepEl.getTotalLength();
-              stepEl.style.strokeDasharray = String(len);
-              stepEl.style.strokeDashoffset = String(len);
-              try {
-                const anim = stepEl.animate([
-                  { strokeDashoffset: len },
-                  { strokeDashoffset: 0 }
-                ], { duration: Math.max(0.05, durations[i]) * 1000, easing: 'ease-in-out', fill: 'forwards' });
-                animRefs.current.push(anim);
-              } catch(_) {}
-            });
-          }, startMs);
-          stepTimersRef.current.push(id);
-          startAcc += durations[i] + gap;
-        }
+         // Schedule highlight (glow) per stroke from the very beginning
+         let startAcc = 0;
+         for (let i = fromIndex; i < pathEls.length; i++) {
+           const startMs = startAcc * 1000;
+           const id = setTimeout(() => {
+             setStepIndex(i);
+             // animate the step layer in sync
+             requestAnimationFrame(() => {
+               const stepEl = svgRef.current && svgRef.current.querySelector('#step-stroke path.stroke-step');
+               if (!stepEl) return;
+               const len = stepEl.getTotalLength();
+               stepEl.style.strokeDasharray = String(len);
+               stepEl.style.strokeDashoffset = String(len);
+               try {
+                 const anim = stepEl.animate([
+                   { strokeDashoffset: len },
+                   { strokeDashoffset: 0 }
+                 ], { duration: Math.max(0.05, durations[i]) * 1000, easing: 'ease-in-out', fill: 'forwards' });
+                 animRefs.current.push(anim);
+               } catch(_) {}
+             });
+           }, startMs);
+           stepTimersRef.current.push(id);
+           startAcc += durations[i] + gap;
+         }
 
-        const totalMs = delayAcc * 1000 + 20;
-        const endId = setTimeout(() => {
-          // hide highlight right after the last stroke completes
-          setStepIndex(-1);
-          setIsPlaying(false);
-          try { onComplete && onComplete(); } catch(_) {}
-        }, totalMs);
-        stepTimersRef.current.push(endId);
-      }
+         const totalMs = delayAcc * 1000 + 20;
+         const endId = setTimeout(() => {
+           // hide highlight right after the last stroke completes
+           setStepIndex(-1);
+           setIsPlaying(false);
+           try { onComplete && onComplete(); } catch(_) {}
+         }, totalMs);
+         stepTimersRef.current.push(endId);
+       }
 
-      function resetAll() {
-        stopAnimations();
-        const svg = svgRef.current;
-        if (svg) {
-          Array.from(svg.querySelectorAll('#all-strokes path.stroke, #step-stroke path.stroke-step')).forEach(el => {
-            const length = el.getTotalLength();
-            el.style.strokeDasharray = String(length);
-            el.style.strokeDashoffset = String(length);
-          });
-        }
-        setIsPlaying(false);
-        setStepIndex(0);
-      }
+       function resetAll() {
+         stopAnimations();
+         const svg = svgRef.current;
+         if (svg) {
+           Array.from(svg.querySelectorAll('#all-strokes path.stroke, #step-stroke path.stroke-step')).forEach(el => {
+             const length = el.getTotalLength();
+             el.style.strokeDasharray = String(length);
+             el.style.strokeDashoffset = String(length);
+           });
+         }
+         setIsPlaying(false);
+         setStepIndex(0);
+       }
 
-      const showPaths = useMemo(() => {
-        if (paths.length === 0) return [];
-        return paths.map((p, idx) => ({ ...p, visible: true, idx }));
-      }, [paths]);
+       const showPaths = useMemo(() => {
+         if (paths.length === 0) return [];
+         return paths.map((p, idx) => ({ ...p, visible: true, idx }));
+       }, [paths]);
 
-      const stepPaths = useMemo(() => {
-        if (paths.length === 0) return [];
-        const invalid = stepIndex < 0 || stepIndex >= paths.length;
-        if (invalid) {
-          return paths.map((p, i) => ({ ...p, visible: false, idx: i }));
-        }
-        return paths.map((p, i) => ({ ...p, visible: i === stepIndex, idx: i }));
-      }, [paths, stepIndex]);
+       const stepPaths = useMemo(() => {
+         if (paths.length === 0) return [];
+         const invalid = stepIndex < 0 || stepIndex >= paths.length;
+         if (invalid) {
+           return paths.map((p, i) => ({ ...p, visible: false, idx: i }));
+         }
+         return paths.map((p, i) => ({ ...p, visible: i === stepIndex, idx: i }));
+       }, [paths, stepIndex]);
 
-      return (
-        <div className="stage-wrap">
-          <div className="toolbar" style={{marginTop: 2}}>
-            <button className="btn" onClick={resetAll}>重置</button>
-            <button className="btn primary" onClick={() => playSequential(0)} disabled={paths.length===0 || isPlaying}>播放全部</button>
-          </div>
-          <div className="toolbar">
-            <button className="btn" onClick={() => setStepIndex(i => Math.max(0, i-1))}>上一笔</button>
-            <span className="kicker">分解第 {paths.length===0?0:stepIndex+1} / {paths.length} 笔</span>
-            <button className="btn" onClick={() => setStepIndex(i => Math.min(paths.length-1, i+1))}>下一笔</button>
-            {/*<button className="btn" onClick={() => { resetAll(); playSequential(stepIndex); }}>从该笔播放</button> */}
-          </div>
-          <div className="stage">
-            <svg ref={svgRef} className="stage-svg" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
-              <GridOverlay />
-              {/* full animation layer (kept underneath to preserve finished state) */}
-              <g id="all-strokes" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#10c9ad'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round">
-                {showPaths.map(({d, idx}) => (
-                  <path key={`all-${idx}`} className="stroke" d={d} />
-                ))}
-              </g>
-              {/* step layer - highlights single stroke by thicker width and glow */}
-              <g id="step-stroke" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round">
-                {stepPaths.map(({d, visible, idx}) => visible ? (
-                  <g key={`step-${idx}`}>
-                    <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
-                  </g>
-                ) : null)}
-              </g>
-            </svg>
-          </div>
-          {error && <div className="error">{error}</div>}
-        </div>
-      );
-    }
+       return (
+         <div className="stage-wrap">
+           <div className="toolbar" style={{marginTop: 2}}>
+             <button className="btn" onClick={resetAll}>重置</button>
+             <button className="btn primary" onClick={() => playSequential(0)} disabled={paths.length===0 || isPlaying}>播放全部</button>
+           </div>
+           <div className="toolbar">
+             <button className="btn" onClick={() => setStepIndex(i => Math.max(0, i-1))}>上一笔</button>
+             <span className="kicker">分解第 {paths.length===0?0:stepIndex+1} / {paths.length} 笔</span>
+             <button className="btn" onClick={() => setStepIndex(i => Math.min(paths.length-1, i+1))}>下一笔</button>
+             {/*<button className="btn" onClick={() => { resetAll(); playSequential(stepIndex); }}>从该笔播放</button> */}
+           </div>
+           <div className="stage">
+             <svg ref={svgRef} className="stage-svg" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg" aria-label="预览">
+               <GridOverlay />
+               {/* full animation layer (kept underneath to preserve finished state) */}
+               <g id="all-strokes" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-color').trim() || '#10c9ad'} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round">
+                 {showPaths.map(({d, idx}) => (
+                   <path key={`all-${idx}`} className="stroke" d={d} />
+                 ))}
+               </g>
+               {/* step layer - highlights single stroke by thicker width and glow */}
+               <g id="step-stroke" stroke={getComputedStyle(document.documentElement).getPropertyValue('--stroke-active-color').trim() || '#1cb9ff'} fill="none" strokeLinecap="round" strokeLinejoin="round">
+                 {stepPaths.map(({d, visible, idx}) => visible ? (
+                   <g key={`step-${idx}`}>
+                     <path d={d} className="stroke-step" strokeWidth={strokeWidth + 2} style={{ filter: 'drop-shadow(0 0 8px rgba(28,185,255,0.55))' }} />
+                   </g>
+                 ) : null)}
+               </g>
+             </svg>
+           </div>
+           {error && <div className="error">{error}</div>}
+         </div>
+       );
+     }
 
-    function Detail({ letter, onBack, onToggleSettings, settings, showSettings, setShowSettings }) {
-      const [globalReplayTick, setGlobalReplayTick] = useState(0);
-      return (
-        <div>
-          <div className="detail-header">
-            <button className="btn-fresh back" onClick={() => { location.hash = ''; }}>
-              ← 返回
-            </button>
-            <button className="btn-fresh settings" onClick={() => setShowSettings(v=>!v)}>
-              设置
-            </button>
-          </div>
-          <div className="panel">
-            <CombinedAnimator
-              letter={letter}
-              candidatesLeft={buildSvgCandidates(letter, false)}
-              candidatesRight={buildSvgCandidates(toLowerRu(letter), true)}
-              autoplay={true}
-              settings={settings}
-              globalReplayTrigger={globalReplayTick}
-              setGlobalReplayTick={setGlobalReplayTick}
-              setShowSettings={setShowSettings}
-            />
-          </div>
-        </div>
-      );
-    }
+     function Detail({ letter, onBack, onToggleSettings, settings, showSettings, setShowSettings, letterMap }) {
+       const [globalReplayTick, setGlobalReplayTick] = useState(0);
+       const mapEntry = letterMap && letterMap[letter];
+       const isSingle = !!(mapEntry && mapEntry.isSingle);
+       const upperUrl = mapEntry ? `/letters/${mapEntry.upper}` : null;
+       const lowerUrl = mapEntry && mapEntry.lower ? `/letters/${mapEntry.lower}` : null;
+       const candidatesLeft = upperUrl ? [upperUrl] : buildSvgCandidates(letter, false);
+       const candidatesRight = !isSingle && lowerUrl ? [lowerUrl] : buildSvgCandidates(toLowerRu(letter), true);
+       return (
+         <div>
+           <div className="detail-header">
+             <button className="btn-fresh back" onClick={() => { location.hash = ''; }}>
+               ← 返回
+             </button>
+             <button className="btn-fresh settings" onClick={() => setShowSettings(v=>!v)}>
+               设置
+             </button>
+           </div>
+           <div className="panel">
+             <CombinedAnimator
+               letter={letter}
+               candidatesLeft={candidatesLeft}
+               candidatesRight={candidatesRight}
+               isSingle={isSingle}
+               autoplay={true}
+               settings={settings}
+               globalReplayTrigger={globalReplayTick}
+               setGlobalReplayTick={setGlobalReplayTick}
+               setShowSettings={setShowSettings}
+             />
+           </div>
+         </div>
+       );
+     }
 
-    function Home({ onPick, onToggleSettings }) {
-      return (
-        <div>
-          <div className="app-header">
-            <div className="title">
-              <div style={{width: 12, height: 12, borderRadius: 999, background: 'linear-gradient(180deg, #9ad0ff, #66a6ff)', boxShadow: '0 0 18px rgba(102,166,255,0.6)'}} />
-              俄语字母笔顺
-            </div>
-            <div className="controls">
-              <button className="btn" onClick={onToggleSettings}>设置</button>
-            </div>
-          </div>
-          <div className="kicker">点击任意字母查看其笔顺（下方将同时显示大写与小写并自动播放）</div>
-          <div className="panel" style={{padding: 8}}>
-            <div className="grid">
-              {RUS_UPPER.map(ch => (
-                <div key={ch} className="tile" onClick={() => onPick(ch)}>
-                  <div className="letter">{ch}</div>
-                  <div className="sub">{toLowerRu(ch)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
+     function Home({ onPick, onToggleSettings }) {
+       return (
+         <div>
+           <div className="app-header">
+             <div className="title">
+               <div style={{width: 12, height: 12, borderRadius: 999, background: 'linear-gradient(180deg, #9ad0ff, #66a6ff)', boxShadow: '0 0 18px rgba(102,166,255,0.6)'}} />
+               俄语字母笔顺
+             </div>
+             <div className="controls">
+               <button className="btn" onClick={onToggleSettings}>设置</button>
+             </div>
+           </div>
+           <div className="kicker">点击任意字母查看其笔顺（下方将同时显示大写与小写并自动播放）</div>
+           <div className="panel" style={{padding: 8}}>
+             <div className="grid">
+               {RUS_UPPER.map(ch => (
+                 <div key={ch} className="tile" onClick={() => onPick(ch)}>
+                   <div className="letter">{ch}</div>
+                   <div className="sub">{toLowerRu(ch)}</div>
+                 </div>
+               ))}
+             </div>
+           </div>
+         </div>
+       );
+     }
 
-    function App() {
-      const { letter, push, clear } = useHashRoute();
-      const isHome = !letter;
-      const [settings, setSettings] = useState({ speed: 300, width: 8, gap: 0.15 });
-      const [showSettings, setShowSettings] = useState(false);
-      const toggleSettings = () => setShowSettings(v => !v);
-      return (
-        <div>
-          {isHome ? (
-            <Home onPick={push} onToggleSettings={toggleSettings} />
-          ) : (
-            <Detail letter={letter} onBack={clear} onToggleSettings={toggleSettings} settings={settings} showSettings={showSettings} setShowSettings={setShowSettings} />
-          )}
-          {showSettings && (
-            <SettingsPopover settings={settings} onChange={setSettings} onClose={()=>setShowSettings(false)} />
-          )}
-        </div>
-      );
-    }
+     function App() {
+       const { letter, push, clear } = useHashRoute();
+       const isHome = !letter;
+       const [settings, setSettings] = useState({ speed: 300, width: 8, gap: 0.15 });
+       const [showSettings, setShowSettings] = useState(false);
+       const [letterMap, setLetterMap] = useState(null);
+       useEffect(() => {
+         (async () => {
+           try {
+             const res = await fetch('/letters/map.json');
+             if (res.ok) {
+               const json = await res.json();
+               setLetterMap(json);
+             }
+           } catch (_) {}
+         })();
+       }, []);
+       const toggleSettings = () => setShowSettings(v => !v);
+       return (
+         <div>
+           {isHome ? (
+             <Home onPick={push} onToggleSettings={toggleSettings} />
+           ) : (
+             <Detail letter={letter} onBack={clear} onToggleSettings={toggleSettings} settings={settings} showSettings={showSettings} setShowSettings={setShowSettings} letterMap={letterMap || {}} />
+           )}
+           {showSettings && (
+             <SettingsPopover settings={settings} onChange={setSettings} onClose={()=>setShowSettings(false)} />
+           )}
+         </div>
+       );
+     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
+     const root = ReactDOM.createRoot(document.getElementById('root'));
+     root.render(<App />);
+   </script>
+ </body>
 </html>
 
 
