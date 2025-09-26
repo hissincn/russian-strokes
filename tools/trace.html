@@ -63,6 +63,14 @@
         border-radius: 8px;
         padding: 4px 6px;
       }
+      select {
+        background: #0b0f16;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 4px 6px;
+        min-width: 80px;
+      }
       button {
         background: #172031;
         color: var(--text);
@@ -113,6 +121,9 @@
       #maskCanvas { pointer-events: none; }
       #svgOverlay { pointer-events: none; }
       #svgOverlay.editing { pointer-events: auto; }
+      #svgOverlay.dragging { pointer-events: auto; }
+      #svgOverlay.dragging path { cursor: move; }
+      #svgOverlay.dragging path:hover { stroke-width: 3.5; }
       .side {
         border: 1px solid var(--border);
         border-radius: 12px;
@@ -155,9 +166,17 @@
   <body>
     <div class="toolbar">
       <div class="group">
-        <label>图片</label>
-        <input id="fileInput" type="file" accept="image/*">
+        <label>图片/SVG</label>
+        <input id="fileInput" type="file" accept="image/*,.svg">
         <button id="fitBtn">适配窗口</button>
+      </div>
+      <div class="group">
+        <label>SVG导入模式</label>
+        <select id="svgImportMode">
+          <option value="both">底图+路径</option>
+          <option value="background">仅底图</option>
+          <option value="paths">仅路径</option>
+        </select>
       </div>
       <div class="group">
         <label>黑色阈值</label>
@@ -184,6 +203,7 @@
       </div>
       <div class="group">
         <button id="editToggle">进入编辑</button>
+        <button id="dragToggle">拖动路径</button>
         <button id="undoBtn">撤销</button>
         <button id="redoBtn">重做</button>
         <button id="clearBtn" class="danger">清空</button>
@@ -220,7 +240,7 @@
           <span class="swatch sw3"></span><span>选择中</span>
           <span class="swatch sw4"></span><span>可绘制区域</span>
         </div>
-        <div class="hint">提示：按住并拖动鼠标在黑色区域上绘制；点击“进入编辑”后可以拖动控制点。编辑模式下：Alt/Option+单击控制点删除；双击路径添加控制点。</div>
+        <div class="hint">提示：现在支持导入图片（PNG/JPG等）和SVG文件。SVG可选择：1)仅作为底图描摹；2)仅导入路径；3)既作为底图又导入路径。绘制模式：按住并拖动鼠标在黑色区域上绘制；拖动模式：点击路径可整体拖动调整位置；编辑模式：拖动控制点微调路径，Alt/Option+单击删除点，双击路径添加点。</div>
         <textarea id="pathText" readonly placeholder="当前选中路径的 SVG path 数据"></textarea>
       </div>
     </div>
@@ -242,6 +262,7 @@
       const clearBtn = document.getElementById('clearBtn');
       const exportBtn = document.getElementById('exportBtn');
       const editToggle = document.getElementById('editToggle');
+      const dragToggle = document.getElementById('dragToggle');
       const pathText = document.getElementById('pathText');
       const snapEnabled = document.getElementById('snapEnabled');
       const snapRadiusInput = document.getElementById('snapRadius');
@@ -252,6 +273,7 @@
       const autoSkeletonBtn = document.getElementById('autoSkeletonBtn');
       const autoScale = document.getElementById('autoScale');
       const autoMinPoints = document.getElementById('autoMinPoints');
+      const svgImportMode = document.getElementById('svgImportMode');
 
       const imgCtx = imageCanvas.getContext('2d');
       const maskCtx = maskCanvas.getContext('2d');
@@ -262,12 +284,18 @@
       // Cached device-pixel buffers for fast/accurate sampling
       let cachedImgData = null; // ImageData of entire canvas at device resolution
       let deviceW = 0, deviceH = 0;
+      // 存储当前图像的变换参数，用于保持底图和路径的一致性
+      let currentTransform = { scale: 1, offsetX: 0, offsetY: 0, displayWidth: 0, displayHeight: 0 };
       let drawing = false;
       let currentPathPoints = [];
       let paths = []; // { id, points: [{x,y}], pathEl, pointsGroup }
       let selectedPathId = null;
       let history = []; // stack of JSON snapshots
       let redoStack = [];
+      // 路径拖动相关状态
+      let isDraggingPath = false;
+      let dragStartPoint = null;
+      let draggedPathId = null;
 
       function stageSize() {
         const rect = stage.getBoundingClientRect();
@@ -295,18 +323,324 @@
       function loadFromFile(file) {
         if (!file) return;
         const url = URL.createObjectURL(file);
-        createImageBitmap(file).then(bmp => {
-          imageBitmapObj = bmp;
-          naturalWidth = bmp.width;
-          naturalHeight = bmp.height;
-          fitToStage();
+        
+        // 检测是否为 SVG 文件
+        if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+          loadSVGFile(file, url);
+        } else {
+          // 处理常规图片文件
+          createImageBitmap(file).then(bmp => {
+            imageBitmapObj = bmp;
+            naturalWidth = bmp.width;
+            naturalHeight = bmp.height;
+            fitToStage();
+            URL.revokeObjectURL(url);
+          }).catch(err => console.error(err));
+        }
+      }
+
+      function loadSVGFile(file, url) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const svgText = e.target.result;
+          
+          // 创建临时 SVG 元素来获取尺寸和路径
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = svgText;
+          const svgEl = tempDiv.querySelector('svg');
+          
+          if (!svgEl) {
+            console.error('无效的 SVG 文件');
+            URL.revokeObjectURL(url);
+            return;
+          }
+          
+          // 获取 SVG 尺寸
+          let svgWidth = 300;  // 默认值
+          let svgHeight = 300; // 默认值
+          
+          if (svgEl.hasAttribute('width') && svgEl.hasAttribute('height')) {
+            svgWidth = parseFloat(svgEl.getAttribute('width')) || 300;
+            svgHeight = parseFloat(svgEl.getAttribute('height')) || 300;
+          } else if (svgEl.hasAttribute('viewBox')) {
+            const viewBox = svgEl.getAttribute('viewBox').split(/\s+|,/);
+            if (viewBox.length >= 4) {
+              svgWidth = parseFloat(viewBox[2]) - parseFloat(viewBox[0]);
+              svgHeight = parseFloat(viewBox[3]) - parseFloat(viewBox[1]);
+            }
+          }
+          
+          const mode = svgImportMode.value;
+          
+          // 根据模式决定处理方式
+          if (mode === 'background' || mode === 'both') {
+            // 渲染 SVG 到 Canvas 作为底图
+            renderSVGToCanvas(svgText, svgWidth, svgHeight, mode, svgEl);
+          } else if (mode === 'paths') {
+            // 仅路径模式：需要先计算变换参数，但不显示底图
+            calculateTransformForSVG(svgWidth, svgHeight);
+            // 解析并导入 SVG 路径
+            importSVGPaths(svgEl, svgWidth, svgHeight);
+          }
+          
           URL.revokeObjectURL(url);
-        }).catch(err => console.error(err));
+        };
+        reader.readAsText(file);
+      }
+
+      // 计算SVG的变换参数（不渲染到画布）
+      function calculateTransformForSVG(svgWidth, svgHeight) {
+        const { width: sw, height: sh } = stageSize();
+        const ir = svgWidth / svgHeight;
+        const sr = sw / sh;
+        let dw = sw, dh = sh;
+        if (ir > sr) {
+          dw = sw; dh = Math.floor(dw / ir);
+        } else {
+          dh = sh; dw = Math.floor(dh * ir);
+        }
+        const dx = Math.floor((sw - dw) / 2);
+        const dy = Math.floor((sh - dh) / 2);
+        
+        // 存储变换参数
+        currentTransform = {
+          scale: Math.min(dw / svgWidth, dh / svgHeight),
+          offsetX: dx,
+          offsetY: dy,
+          displayWidth: dw,
+          displayHeight: dh
+        };
+        
+      }
+
+      function renderSVGToCanvas(svgText, width, height, mode, svgEl) {
+        const img = new Image();
+        const svgBlob = new Blob([svgText], { type: 'image/svg+xml' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        
+        img.onload = function() {
+          // 创建一个临时的 ImageBitmap
+          createImageBitmap(img).then(bmp => {
+            imageBitmapObj = bmp;
+            naturalWidth = width;
+            naturalHeight = height;
+            fitToStage();
+            URL.revokeObjectURL(svgUrl);
+            
+            // 如果是"both"模式，在底图渲染完成后导入路径
+            if (mode === 'both' && svgEl) {
+              importSVGPaths(svgEl, width, height);
+            }
+          }).catch(err => {
+            console.error('SVG 渲染失败:', err);
+            URL.revokeObjectURL(svgUrl);
+          });
+        };
+        
+        img.onerror = function(err) {
+          console.error('SVG 加载失败:', err);
+          URL.revokeObjectURL(svgUrl);
+        };
+        
+        img.src = svgUrl;
+      }
+
+      // 导入 SVG 路径
+      function importSVGPaths(svgEl, svgWidth, svgHeight) {
+        const pathElements = svgEl.querySelectorAll('path');
+        
+        // 使用与底图相同的变换参数
+        const scale = currentTransform.scale;
+        const offsetX = currentTransform.offsetX;
+        const offsetY = currentTransform.offsetY;
+        
+        
+        pathElements.forEach(pathEl => {
+          const d = pathEl.getAttribute('d');
+          if (!d) return;
+          
+          const points = parseSVGPath(d, scale, offsetX, offsetY);
+          if (points.length >= 2) {
+            createPathFromPoints(points);
+          }
+        });
+        
+        if (paths.length > 0) {
+          selectPath(paths[paths.length - 1].id);
+          pushHistory();
+        }
+      }
+
+      // 简化的 SVG 路径解析器
+      function parseSVGPath(d, scale, offsetX, offsetY) {
+        const points = [];
+        let currentX = 0, currentY = 0;
+        let startX = 0, startY = 0;
+        
+        // 清理路径数据，移除多余空格
+        d = d.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+        
+        const commands = d.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || [];
+        
+        commands.forEach(cmd => {
+          const letter = cmd[0];
+          const coords = cmd.slice(1).trim().split(/\s+/).map(n => parseFloat(n)).filter(n => !isNaN(n));
+          
+          switch (letter.toLowerCase()) {
+            case 'm': // moveto
+              if (coords.length >= 2) {
+                if (letter === 'm') { // 相对
+                  currentX += coords[0];
+                  currentY += coords[1];
+                } else { // 绝对
+                  currentX = coords[0];
+                  currentY = coords[1];
+                }
+                startX = currentX;
+                startY = currentY;
+                addScaledPoint(points, currentX, currentY, scale, offsetX, offsetY);
+                
+                // M后面的坐标对被视为L命令
+                for (let i = 2; i < coords.length; i += 2) {
+                  if (i + 1 < coords.length) {
+                    if (letter === 'm') {
+                      currentX += coords[i];
+                      currentY += coords[i + 1];
+                    } else {
+                      currentX = coords[i];
+                      currentY = coords[i + 1];
+                    }
+                    addScaledPoint(points, currentX, currentY, scale, offsetX, offsetY);
+                  }
+                }
+              }
+              break;
+              
+            case 'l': // lineto
+              for (let i = 0; i < coords.length; i += 2) {
+                if (i + 1 < coords.length) {
+                  if (letter === 'l') { // 相对
+                    currentX += coords[i];
+                    currentY += coords[i + 1];
+                  } else { // 绝对
+                    currentX = coords[i];
+                    currentY = coords[i + 1];
+                  }
+                  addScaledPoint(points, currentX, currentY, scale, offsetX, offsetY);
+                }
+              }
+              break;
+              
+            case 'h': // horizontal lineto
+              for (let i = 0; i < coords.length; i++) {
+                if (letter === 'h') { // 相对
+                  currentX += coords[i];
+                } else { // 绝对
+                  currentX = coords[i];
+                }
+                addScaledPoint(points, currentX, currentY, scale, offsetX, offsetY);
+              }
+              break;
+              
+            case 'v': // vertical lineto
+              for (let i = 0; i < coords.length; i++) {
+                if (letter === 'v') { // 相对
+                  currentY += coords[i];
+                } else { // 绝对
+                  currentY = coords[i];
+                }
+                addScaledPoint(points, currentX, currentY, scale, offsetX, offsetY);
+              }
+              break;
+              
+            case 'c': // curveto (简化为采样点)
+              for (let i = 0; i < coords.length; i += 6) {
+                if (i + 5 < coords.length) {
+                  let x1, y1, x2, y2, x, y;
+                  if (letter === 'c') { // 相对
+                    x1 = currentX + coords[i];
+                    y1 = currentY + coords[i + 1];
+                    x2 = currentX + coords[i + 2];
+                    y2 = currentY + coords[i + 3];
+                    x = currentX + coords[i + 4];
+                    y = currentY + coords[i + 5];
+                  } else { // 绝对
+                    x1 = coords[i];
+                    y1 = coords[i + 1];
+                    x2 = coords[i + 2];
+                    y2 = coords[i + 3];
+                    x = coords[i + 4];
+                    y = coords[i + 5];
+                  }
+                  
+                  // 对贝塞尔曲线进行采样
+                  for (let t = 0.2; t <= 1; t += 0.2) {
+                    const bezX = Math.pow(1-t, 3) * currentX + 3 * Math.pow(1-t, 2) * t * x1 + 3 * (1-t) * Math.pow(t, 2) * x2 + Math.pow(t, 3) * x;
+                    const bezY = Math.pow(1-t, 3) * currentY + 3 * Math.pow(1-t, 2) * t * y1 + 3 * (1-t) * Math.pow(t, 2) * y2 + Math.pow(t, 3) * y;
+                    addScaledPoint(points, bezX, bezY, scale, offsetX, offsetY);
+                  }
+                  
+                  currentX = x;
+                  currentY = y;
+                }
+              }
+              break;
+              
+            case 'z': // closepath
+              if (startX !== currentX || startY !== currentY) {
+                addScaledPoint(points, startX, startY, scale, offsetX, offsetY);
+              }
+              currentX = startX;
+              currentY = startY;
+              break;
+          }
+        });
+        
+        return points;
+      }
+
+      function addScaledPoint(points, x, y, scale, offsetX, offsetY) {
+        const scaledX = x * scale + offsetX;
+        const scaledY = y * scale + offsetY;
+        
+        // 避免重复的相邻点
+        if (points.length === 0 || 
+            Math.abs(points[points.length - 1].x - scaledX) > 0.5 || 
+            Math.abs(points[points.length - 1].y - scaledY) > 0.5) {
+          points.push({ x: scaledX, y: scaledY });
+        }
+      }
+
+      function createPathFromPoints(points) {
+        if (points.length < 2) return;
+        
+        const simplified = rdp(points, getEpsilon());
+        const id = 'svg' + Date.now() + Math.random().toString(16).slice(2);
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', '#67d2ff');
+        path.setAttribute('stroke-width', '2.2');
+        path.setAttribute('vector-effect', 'non-scaling-stroke');
+        path.dataset.id = id;
+        
+        group.appendChild(path);
+        svg.appendChild(group);
+        
+        const record = { id, points: simplified, pathEl: path, groupEl: group };
+        paths.push(record);
+        updatePathElement(record);
       }
 
       function fitToStage() {
         const { width: sw, height: sh } = stageSize();
-        if (!imageBitmapObj) { clearCanvas(); return; }
+        if (!imageBitmapObj) { 
+          clearCanvas(); 
+          // 重置变换参数
+          currentTransform = { scale: 1, offsetX: 0, offsetY: 0, displayWidth: sw, displayHeight: sh };
+          return; 
+        }
         const ir = imageBitmapObj.width / imageBitmapObj.height;
         const sr = sw / sh;
         let dw = sw, dh = sh;
@@ -318,6 +652,16 @@
         clearCanvas();
         const dx = Math.floor((sw - dw) / 2);
         const dy = Math.floor((sh - dh) / 2);
+        
+        // 存储变换参数
+        currentTransform = {
+          scale: Math.min(dw / naturalWidth, dh / naturalHeight),
+          offsetX: dx,
+          offsetY: dy,
+          displayWidth: dw,
+          displayHeight: dh
+        };
+        
         imgCtx.drawImage(imageBitmapObj, dx, dy, dw, dh);
         capturePixelsAndMask();
       }
@@ -805,23 +1149,70 @@
 
       stage.addEventListener('pointerdown', e => {
         let p = pointerToStage(e);
+        
+        // 拖动模式：尝试拖动路径
+        if (svg.classList.contains('dragging')) {
+          const pathUnderPointer = findPathAtPoint(p);
+          if (pathUnderPointer) {
+            isDraggingPath = true;
+            dragStartPoint = p;
+            draggedPathId = pathUnderPointer.id;
+            selectPath(draggedPathId);
+            stage.setPointerCapture(e.pointerId);
+            e.preventDefault();
+            return;
+          }
+        }
+        
+        // 编辑模式：使用原有的句柄逻辑
+        if (svg.classList.contains('editing')) return;
+        
+        // 绘制模式：原有的绘制逻辑
         p = snapToDark(p);
-        if (svg.classList.contains('editing')) return; // editing mode uses handles
         if (!isDarkAt(p.x, p.y)) return; // only start on dark (after snap)
         stage.setPointerCapture(e.pointerId);
         beginPathAt(p);
       });
       stage.addEventListener('pointermove', e => {
+        // 路径拖动模式
+        if (isDraggingPath && draggedPathId && dragStartPoint) {
+          const currentPoint = pointerToStage(e);
+          const dx = currentPoint.x - dragStartPoint.x;
+          const dy = currentPoint.y - dragStartPoint.y;
+          movePathBy(draggedPathId, dx, dy);
+          dragStartPoint = currentPoint; // 更新起始点为当前点，实现连续拖动
+          return;
+        }
+        
+        // 原有的绘制模式
         if (!drawing) return;
         const p = snapToDark(pointerToStage(e));
         addPointIfAllowed(p);
       });
       stage.addEventListener('pointerup', e => {
+        // 路径拖动结束
+        if (isDraggingPath) {
+          isDraggingPath = false;
+          dragStartPoint = null;
+          draggedPathId = null;
+          pushHistory(); // 保存拖动后的状态
+          stage.releasePointerCapture(e.pointerId);
+          return;
+        }
+        
+        // 原有的绘制结束逻辑
         if (!drawing) return;
         endPath();
         stage.releasePointerCapture(e.pointerId);
       });
-      stage.addEventListener('pointerleave', () => { if (drawing) endPath(); });
+      stage.addEventListener('pointerleave', () => { 
+        if (drawing) endPath(); 
+        if (isDraggingPath) {
+          isDraggingPath = false;
+          dragStartPoint = null;
+          draggedPathId = null;
+        }
+      });
 
       // Select path by clicking it
       svg.addEventListener('pointerdown', e => {
@@ -917,6 +1308,50 @@
         return (p.x - px) ** 2 + (p.y - py) ** 2;
       }
 
+      // 路径拖动相关函数
+      function findPathAtPoint(point) {
+        // 遍历所有路径，找到距离点最近的路径
+        let closestPath = null;
+        let minDistance = 15; // 最大检测距离
+
+        for (const path of paths) {
+          for (let i = 0; i < path.points.length - 1; i++) {
+            const a = path.points[i];
+            const b = path.points[i + 1];
+            const dist = Math.sqrt(pointToSegmentDist2(point, a, b));
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestPath = path;
+            }
+          }
+        }
+        return closestPath;
+      }
+
+      function movePathBy(pathId, dx, dy) {
+        const path = paths.find(p => p.id === pathId);
+        if (!path) return;
+
+        // 移动所有点
+        for (const point of path.points) {
+          point.x += dx;
+          point.y += dy;
+        }
+
+        // 更新路径元素
+        updatePathElement(path);
+        
+        // 如果有控制点，也要更新它们
+        if (svg.classList.contains('editing') && selectedPathId === pathId) {
+          updateHandles();
+        }
+        
+        // 更新路径文本
+        if (selectedPathId === pathId) {
+          updatePathText();
+        }
+      }
+
       undoBtn.addEventListener('click', () => { undo(); });
       redoBtn.addEventListener('click', () => { redo(); });
       clearBtn.addEventListener('click', () => {
@@ -935,9 +1370,30 @@
           editToggle.textContent = '进入编辑';
           removeHandles();
         } else {
+          // 退出拖动模式（如果在拖动模式）
+          if (svg.classList.contains('dragging')) {
+            svg.classList.remove('dragging');
+            dragToggle.textContent = '拖动路径';
+          }
           svg.classList.add('editing');
           editToggle.textContent = '退出编辑';
           if (selectedPathId) updateHandles();
+        }
+      });
+
+      dragToggle.addEventListener('click', () => {
+        if (svg.classList.contains('dragging')) {
+          svg.classList.remove('dragging');
+          dragToggle.textContent = '拖动路径';
+        } else {
+          // 退出编辑模式（如果在编辑模式）
+          if (svg.classList.contains('editing')) {
+            svg.classList.remove('editing');
+            editToggle.textContent = '进入编辑';
+            removeHandles();
+          }
+          svg.classList.add('dragging');
+          dragToggle.textContent = '退出拖动';
         }
       });
 
